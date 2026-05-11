@@ -16,6 +16,72 @@ CLAUDE_HOME="/home/${CLAUDE_USER}"
 log()  { printf '\033[1;34m==>\033[0m %s\n' "$*"; }
 ok()   { printf '\033[1;32m✓\033[0m %s\n' "$*"; }
 warn() { printf '\033[1;33m!\033[0m %s\n' "$*" >&2; }
+die()  { printf '\033[1;31m✗\033[0m %s\n' "$*" >&2; exit 1; }
+
+#------------------------------------------------------------------------------
+# Arg parsing
+#------------------------------------------------------------------------------
+ASSUME_YES=0
+for arg in "$@"; do
+  case "$arg" in
+    -y|--yes) ASSUME_YES=1 ;;
+    -h|--help)
+      cat <<EOF
+Usage: bootstrap.sh [-y|--yes]
+
+  -y, --yes   Skip the interactive lockout-risk confirmation.
+              Use only after verifying root has a working SSH key.
+EOF
+      exit 0 ;;
+    *) die "unknown argument: $arg (try --help)" ;;
+  esac
+done
+
+#------------------------------------------------------------------------------
+# Pre-flight: SSH key sanity check — must run BEFORE we change anything
+#------------------------------------------------------------------------------
+log "Pre-flight: checking root SSH keys"
+AUTH_FILE="/root/.ssh/authorized_keys"
+if [[ ! -s "$AUTH_FILE" ]]; then
+  die "$AUTH_FILE is missing or empty.
+       This bootstrap disables SSH password auth — you will be LOCKED OUT.
+       Add at least one valid SSH public key for root before re-running:
+           mkdir -p /root/.ssh && chmod 700 /root/.ssh
+           echo 'ssh-ed25519 AAAA... your-key' >> $AUTH_FILE
+           chmod 600 $AUTH_FILE"
+fi
+if ! ssh-keygen -l -f "$AUTH_FILE" >/dev/null 2>&1; then
+  die "$AUTH_FILE failed validation (ssh-keygen -l).
+       Open it and confirm each line is a valid SSH public key."
+fi
+KEY_COUNT=$(ssh-keygen -l -f "$AUTH_FILE" 2>/dev/null | wc -l | tr -d ' ')
+ok "$AUTH_FILE has $KEY_COUNT valid key(s)"
+
+#------------------------------------------------------------------------------
+# Confirmation — make sure the operator knows what's changing
+#------------------------------------------------------------------------------
+if [[ $ASSUME_YES -ne 1 ]]; then
+  cat >&2 <<EOF
+
+This bootstrap will:
+  • Disable SSH password authentication (key-only login)
+  • Set PermitRootLogin to "prohibit-password"
+  • Enable UFW (allow port 22 only)
+  • Install fail2ban + unattended-upgrades
+  • Create 'claude' user with passwordless sudo and mirror root's authorized_keys
+
+If the key(s) in $AUTH_FILE do not actually let you log in, you will be
+LOCKED OUT after sshd reloads. Test from a SECOND terminal first:
+    ssh -i <your-private-key> root@<this-host> 'echo ok'
+
+EOF
+  if [[ -t 0 ]]; then
+    read -r -p "Proceed? [y/N] " ans
+    [[ "$ans" =~ ^[Yy]$ ]] || die "Aborted by user."
+  else
+    die "Non-interactive run without --yes. Re-run with -y to acknowledge the lockout risk."
+  fi
+fi
 
 #------------------------------------------------------------------------------
 # 1. Create claude user with passwordless sudo
@@ -126,10 +192,13 @@ fi
 #------------------------------------------------------------------------------
 # 9. Install claude.sh
 #------------------------------------------------------------------------------
-log "Installing claude.sh to /usr/local/bin"
+log "Linking claude.sh into /usr/local/bin"
 if [[ -f "${SCRIPT_DIR}/claude.sh" ]]; then
-  install -m 0755 "${SCRIPT_DIR}/claude.sh" /usr/local/bin/claude.sh
-  ok "claude.sh installed"
+  chmod +x "${SCRIPT_DIR}/claude.sh"
+  # Replace any prior copy or symlink with a fresh symlink so edits in the
+  # skill repo flow through without re-running bootstrap.
+  ln -sfn "${SCRIPT_DIR}/claude.sh" /usr/local/bin/claude.sh
+  ok "claude.sh -> ${SCRIPT_DIR}/claude.sh"
 else
   warn "${SCRIPT_DIR}/claude.sh not found — install it manually"
 fi

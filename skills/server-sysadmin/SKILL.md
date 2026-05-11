@@ -22,24 +22,61 @@ If unsure, ask. Bootstrap is one-time per VPS; provisioning is per target server
 
 Run **once** on a fresh root login. Idempotent — safe to re-run.
 
-1. Run `bash scripts/bootstrap.sh` from the skill directory. It will:
-   - Create the `claude` user with passwordless sudo
-   - Copy root's `~/.ssh/authorized_keys` to `/home/claude/.ssh/authorized_keys`
-   - Install UFW (port 22 only), fail2ban, unattended-upgrades
-   - Create a 1GB swap file if none exists
-   - Disable SSH password auth + root password login (keys only)
-   - Install `scripts/claude.sh` to `/usr/local/bin/claude.sh`
-   - Pre-authorize workspace trust in `/root/.claude.json` for `/root`
-   - Set `allowBypassPermissions: true` in `/root/.claude/settings.json`
-   - Write a starter `/root/CLAUDE.md`
-2. After it finishes, tell the user:
-   - "Bootstrap complete. Run `claude.sh list` to see sessions."
-   - "Next: provision a project — give me a name, hostname, and user for the target server."
+### Step 0 — verify SSH key access BEFORE doing anything
 
-If `claude.sh` is not on PATH afterwards, fall back to:
+This bootstrap disables SSH password auth. If root has no working SSH key the user gets locked out the moment sshd reloads. **You must verify keys before running the script.**
+
+1. Inspect `/root/.ssh/authorized_keys`:
+   ```bash
+   ls -la /root/.ssh/
+   ssh-keygen -l -f /root/.ssh/authorized_keys 2>/dev/null || echo "MISSING OR INVALID"
+   ```
+2. Report back to the user: how many keys, fingerprints, whether they parse as valid SSH public keys.
+3. Ask the user to confirm: **"Can you SSH in as root using one of these keys right now? Test from a second terminal."** Wait for confirmation.
+4. **If `authorized_keys` is missing, empty, or invalid, do NOT run bootstrap.** Offer to help set one up:
+   ```bash
+   mkdir -p /root/.ssh && chmod 700 /root/.ssh
+   # User pastes their ssh-ed25519 / ssh-rsa public key:
+   nano /root/.ssh/authorized_keys
+   chmod 600 /root/.ssh/authorized_keys
+   ```
+   Then re-test from a second terminal before proceeding.
+
+The script itself enforces this with a pre-flight check and refuses to run if `authorized_keys` is missing, empty, or unparseable. It also prompts interactively unless invoked with `-y`.
+
+### Step 1 — run bootstrap
+
+Once Step 0 is satisfied:
+
+```bash
+bash scripts/bootstrap.sh        # interactive — prompts to confirm lockout risk
+# or, if the user has already confirmed in chat:
+bash scripts/bootstrap.sh -y     # skip prompt
+```
+
+It will:
+- Re-check `authorized_keys` (pre-flight, hard fail)
+- Create the `claude` user with passwordless sudo
+- Mirror root's `authorized_keys` to `/home/claude/.ssh/`
+- Install UFW (port 22 only), fail2ban, unattended-upgrades
+- Create a 1GB swap file if none exists
+- Disable SSH password auth + set `PermitRootLogin prohibit-password`
+- **Symlink** `scripts/claude.sh` to `/usr/local/bin/claude.sh` (so edits in the skill repo propagate without reinstall)
+- Pre-authorize workspace trust in `/root/.claude.json` for `/root`
+- Set `allowBypassPermissions: true` in `/root/.claude/settings.json`
+- Write a starter `/root/CLAUDE.md`
+
+### Step 2 — hand off
+
+After it finishes, tell the user:
+- "Bootstrap complete. Run `claude.sh list` to see sessions."
+- "Next: provision a project — give me a name, hostname, and user for the target server."
+
+If `claude.sh` is not on PATH afterwards, fall back to a symlink (not a copy — we want edits in the skill to propagate):
 ```bash
 find / -name claude.sh -path '*/server-sysadmin/*' 2>/dev/null
-cp <found_path> /usr/local/bin/claude.sh && chmod +x /usr/local/bin/claude.sh
+chmod +x <found_path>
+ln -sfn <found_path> /usr/local/bin/claude.sh
 ```
 
 ---
