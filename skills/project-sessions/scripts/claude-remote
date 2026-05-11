@@ -466,9 +466,12 @@ cmd_sessions() {
   say "Sessions for ${c_blue}$project${c_reset} (most recent first):"
   echo
   printf '%-4s %-10s %-16s %-6s %s\n' "#" "ID" "WHEN" "MSGS" "FIRST USER MESSAGE"
-  printf '%s\n' "$json" | python3 - <<'PY'
+  # Pass JSON via argv (not pipe) — a heredoc-supplied script can't also read
+  # from a piped stdin: the `<<` redirect overrides the pipe, so json.load
+  # would see empty input.
+  python3 - "$json" <<'PY'
 import json, sys
-data = json.load(sys.stdin)
+data = json.loads(sys.argv[1])
 for i, s in enumerate(data, 1):
     print(f"{i:<4} {s['sid'][:8]:<10} {s['mtime_h']:<16} {s['msgs']:<6} {s['preview']}")
 PY
