@@ -53,9 +53,9 @@ Steps:
        <contents of /home/claude/<project>/key.pub>
 
    Then start the session:
-       claude-relay start <project>
+       claude-remote start <project>
 
-   (To change the label later: claude-relay rename <project> "<new label>")
+   (To change the label later: claude-remote rename <project> "<new label>")
    ```
 8. **Test SSH** (optional, ask the user first):
    ```bash

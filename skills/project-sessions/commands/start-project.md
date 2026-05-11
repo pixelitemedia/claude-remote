@@ -6,7 +6,7 @@ allowed-tools: Bash
 
 Start the relay project session named "$ARGUMENTS".
 
-If `$ARGUMENTS` is empty, first run `claude-relay list` to show available projects and ask the user which one to start. Then call `claude-relay start <name>`.
+If `$ARGUMENTS` is empty, first run `claude-remote list` to show available projects and ask the user which one to start. Then call `claude-remote start <name>`.
 
 Starting a project:
 - Marks desired_state=running in the state file

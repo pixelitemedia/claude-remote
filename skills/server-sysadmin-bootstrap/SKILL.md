@@ -54,20 +54,20 @@ What it does:
 - Pre-authorizes workspace trust in `/root/.claude.json` for `/root`
 - Sets `allowBypassPermissions: true` in `/root/.claude/settings.json`
 - Writes a starter `/root/CLAUDE.md`
-- **Chains into project-sessions install** if that skill is present as a sibling — symlinks `claude-relay` and slash commands, creates `/var/lib/claude-relay/`
-- **Offers to install the cron reconciler** (`*/5 * * * * /usr/local/bin/claude-relay reconcile`). With `-y` it's installed; without, it's prompted.
+- **Chains into project-sessions install** if that skill is present as a sibling — symlinks `claude-remote` and slash commands, creates `/var/lib/claude-remote/`
+- **Offers to install the cron reconciler** (`*/5 * * * * /usr/local/bin/claude-remote reconcile`). With `-y` it's installed; without, it's prompted.
 
 ### Step 2 — hand off to `server-sysadmin`
 
 After bootstrap finishes, tell the user:
-- "Bootstrap complete. The relay is hardened and `claude-relay` is installed."
+- "Bootstrap complete. The relay is hardened and `claude-remote` is installed."
 - "Next: provision a target server. Tell me a name, hostname, and user, and I'll set up its project workspace." (This invokes the `server-sysadmin` skill.)
 
-If `claude.sh` or `claude-relay` are missing from PATH afterwards, fall back to symlinks (not copies — we want edits in the skill repo to propagate):
+If `claude.sh` or `claude-remote` are missing from PATH afterwards, fall back to symlinks (not copies — we want edits in the skill repo to propagate):
 
 ```bash
 find / -name claude.sh -path '*/server-sysadmin-bootstrap/*' 2>/dev/null
-find / -name claude-relay -path '*/project-sessions/*' 2>/dev/null
+find / -name claude-remote -path '*/project-sessions/*' 2>/dev/null
 chmod +x <found_path>
 ln -sfn <found_path> /usr/local/bin/<basename>
 ```
@@ -77,7 +77,7 @@ ln -sfn <found_path> /usr/local/bin/<basename>
 - `scripts/bootstrap.sh` — the idempotent installer
 - `scripts/claude.sh` — tmux session launcher, installed at `/usr/local/bin/claude.sh`
 
-`claude.sh` provides `claude.sh` (root session), `claude.sh stop`, `claude.sh status`, `claude.sh list`, and `claude.sh <project> [stop|status]`. For projects it delegates to `claude-relay` when installed, so desired-state stays coherent.
+`claude.sh` provides `claude.sh` (root session), `claude.sh stop`, `claude.sh status`, `claude.sh list`, and `claude.sh <project> [stop|status]`. For projects it delegates to `claude-remote` when installed, so desired-state stays coherent.
 
 ## Key gotchas
 

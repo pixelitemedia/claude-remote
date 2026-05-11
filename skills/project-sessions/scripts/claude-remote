@@ -1,19 +1,19 @@
 #!/usr/bin/env bash
-# claude-relay — manage relay project Claude sessions with persisted desired-state.
+# claude-remote — manage relay project Claude sessions with persisted desired-state.
 #
-# State file:  /var/lib/claude-relay/state.json
-# Log file:    /var/log/claude-relay.log
+# State file:  /var/lib/claude-remote/state.json
+# Log file:    /var/log/claude-remote.log
 #
-# Usage: claude-relay <command> [args]   (see --help)
+# Usage: claude-remote <command> [args]   (see --help)
 
 set -euo pipefail
 
 CLAUDE_USER="claude"
 CLAUDE_HOME="/home/${CLAUDE_USER}"
 PROJECT_PREFIX="claude-"
-STATE_DIR="/var/lib/claude-relay"
+STATE_DIR="/var/lib/claude-remote"
 STATE_FILE="${STATE_DIR}/state.json"
-LOG_FILE="/var/log/claude-relay.log"
+LOG_FILE="/var/log/claude-remote.log"
 
 c_blue=$'\033[1;34m'
 c_green=$'\033[1;32m'
@@ -149,11 +149,12 @@ start_tmux() {
   local label_esc; label_esc=$(python3 -c 'import shlex, sys; print(shlex.quote(sys.argv[1]))' "$label")
 
   logmsg "starting $session ($dir) — label: $label"
-  # --continue resumes the most recent Claude session in this workspace.
-  # If no prior session exists, Claude Code falls back to a fresh one.
+  # remote-control is a long-lived daemon; sessions are spawned/resumed from
+  # the web UI, so --continue is not used at the daemon level (and the current
+  # CLI rejects it in combination with remote-control).
   # --name sets the Remote Control session title (shown in the phone picker).
   sudo -u "$CLAUDE_USER" tmux new-session -d -s "$session" -c "$dir" \
-    "claude --continue remote-control --name $label_esc"
+    "$CLAUDE_HOME/.local/bin/claude remote-control --name $label_esc"
 
   # Give tmux a moment to register the session.
   sleep 0.5
@@ -252,7 +253,7 @@ cmd_rename() {
   ensure_state
   local project=${1:-}
   local label=${2:-}
-  [[ -n "$project" && -n "$label" ]] || die "usage: claude-relay rename <project> <label>"
+  [[ -n "$project" && -n "$label" ]] || die "usage: claude-remote rename <project> <label>"
   project_exists "$project" || die "project '$project' not found"
 
   local cfg="$(project_dir "$project")/config.json"
@@ -268,13 +269,13 @@ with open(cfg_path, "w") as f:
     json.dump(cfg, f, indent=2)
 PY
   say "${c_green}✓${c_reset} session_label set in $cfg"
-  say "Restart the project to apply: claude-relay restart $project"
+  say "Restart the project to apply: claude-remote restart $project"
 }
 
 cmd_start() {
   ensure_state
   local project=${1:-}
-  [[ -n "$project" ]] || die "usage: claude-relay start <project>"
+  [[ -n "$project" ]] || die "usage: claude-remote start <project>"
   state_update "$project" desired_state=running last_started="$(ts)"
   start_tmux "$project"
 }
@@ -282,14 +283,14 @@ cmd_start() {
 cmd_stop() {
   ensure_state
   local project=${1:-}
-  [[ -n "$project" ]] || die "usage: claude-relay stop <project>"
+  [[ -n "$project" ]] || die "usage: claude-remote stop <project>"
   state_update "$project" desired_state=stopped last_stopped="$(ts)"
   stop_tmux "$project"
 }
 
 cmd_restart() {
   local project=${1:-}
-  [[ -n "$project" ]] || die "usage: claude-relay restart <project>"
+  [[ -n "$project" ]] || die "usage: claude-remote restart <project>"
   cmd_stop "$project"
   cmd_start "$project"
 }
@@ -328,8 +329,8 @@ cmd_install() {
   local cmds_dst="/root/.claude/commands"
 
   chmod +x "$self"
-  ln -sfn "$self" /usr/local/bin/claude-relay
-  say "${c_green}✓${c_reset} /usr/local/bin/claude-relay -> $self"
+  ln -sfn "$self" /usr/local/bin/claude-remote
+  say "${c_green}✓${c_reset} /usr/local/bin/claude-remote -> $self"
 
   install -d -m 0750 "$cmds_dst"
   if [[ -d "$cmds_src" ]]; then
@@ -349,11 +350,11 @@ State file:        $STATE_FILE
 Log file:          $LOG_FILE
 
 To enable automatic monitoring (every 5 minutes), add this cron entry as root:
-    */5 * * * * /usr/local/bin/claude-relay reconcile
+    */5 * * * * /usr/local/bin/claude-remote reconcile
 
 Or install it now (you'll be prompted by your shell, since this script won't touch crontab without explicit consent):
-    (crontab -l 2>/dev/null | grep -v '/claude-relay reconcile'; \\
-     echo '*/5 * * * * /usr/local/bin/claude-relay reconcile') | crontab -
+    (crontab -l 2>/dev/null | grep -v '/claude-remote reconcile'; \\
+     echo '*/5 * * * * /usr/local/bin/claude-remote reconcile') | crontab -
 EOF
 }
 
@@ -374,7 +375,7 @@ case "${1:-list}" in
   install)     shift || true; cmd_install "$@" ;;
   -h|--help|help)
     cat <<EOF
-Usage: claude-relay <command> [args]
+Usage: claude-remote <command> [args]
 
 Commands:
   list                       List all projects with desired and actual states (default)

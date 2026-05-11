@@ -3,7 +3,7 @@ description: List all relay project sessions with their desired and actual state
 allowed-tools: Bash
 ---
 
-Run `claude-relay list` and present the result to the user.
+Run `claude-remote list` and present the result to the user.
 
 Highlight any rows where DESIRED ≠ ACTUAL:
 - `desired=running, actual=stopped` → drift, reconcile will fix this within ~5 minutes

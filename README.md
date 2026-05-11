@@ -37,7 +37,7 @@ Phone → Remote Control → Relay VPS (Claude Code) → SSH → Target servers
 | [`skills/server-sysadmin/references/project-CLAUDE.md.template`](skills/server-sysadmin/references/project-CLAUDE.md.template) | Stub copied into new projects |
 | [`skills/server-ssh/`](skills/server-ssh/) | Operator skill — copied into each project workspace at provisioning time |
 | [`skills/project-sessions/`](skills/project-sessions/) | Stateful session manager (start/stop/reconcile) |
-| [`skills/project-sessions/scripts/claude-relay`](skills/project-sessions/scripts/claude-relay) | CLI: `list`, `status`, `start`, `stop`, `restart`, `rename`, `reconcile`, `install` |
+| [`skills/project-sessions/scripts/claude-remote`](skills/project-sessions/scripts/claude-remote) | CLI: `list`, `status`, `start`, `stop`, `restart`, `rename`, `reconcile`, `install` |
 | [`skills/project-sessions/commands/`](skills/project-sessions/commands/) | Slash commands (`/list-projects`, `/start-project`, …) |
 | [`skills/project-sessions/references/cron.example`](skills/project-sessions/references/cron.example) | Reconcile cron snippet (+ optional Haiku check) |
 
@@ -45,7 +45,7 @@ Phone → Remote Control → Relay VPS (Claude Code) → SSH → Target servers
 
 Three skills, used in order:
 
-1. **`server-sysadmin-bootstrap`** — one-time per relay. Hardens the server, installs `claude.sh` and `claude-relay`, optionally adds the cron reconciler.
+1. **`server-sysadmin-bootstrap`** — one-time per relay. Hardens the server, installs `claude.sh` and `claude-remote`, optionally adds the cron reconciler.
 2. **`server-sysadmin`** — once per target server. Creates `/home/claude/<project>/` with its own keypair, `config.json`, and bundled `server-ssh` operator skill.
 3. **`project-sessions`** — used continuously. Manages running project Claude sessions with persisted desired state.
 
@@ -69,7 +69,7 @@ You: set up sysadmin
 Claude will:
 1. Inspect `/root/.ssh/authorized_keys`, report fingerprints, and ask you to confirm you can SSH in with one of them from a second terminal.
 2. Run `bash skills/server-sysadmin-bootstrap/scripts/bootstrap.sh` after you confirm.
-3. The script hardens the server (UFW, fail2ban, unattended-upgrades, key-only SSH, 1GB swap), creates the `claude` user, installs `claude.sh` and `claude-relay`, and prompts to install the 5-minute reconcile cron.
+3. The script hardens the server (UFW, fail2ban, unattended-upgrades, key-only SSH, 1GB swap), creates the `claude` user, installs `claude.sh` and `claude-remote`, and prompts to install the 5-minute reconcile cron.
 
 Re-running is safe — the script is idempotent.
 
@@ -87,8 +87,8 @@ Claude will create `/home/claude/rai/` with its own ed25519 keypair, `config.jso
 You: /start-project rai
 ```
 
-Or equivalently `claude-relay start rai`. This:
-- Marks `desired_state=running` in `/var/lib/claude-relay/state.json`
+Or equivalently `claude-remote start rai`. This:
+- Marks `desired_state=running` in `/var/lib/claude-remote/state.json`
 - Launches `claude --continue remote-control` inside tmux, resuming the latest session (not starting fresh)
 - The cron reconciler will bring it back if it ever crashes
 
@@ -106,7 +106,7 @@ Installed at `/usr/local/bin/claude.sh` by bootstrap.
 claude.sh                   # Root session (start or reattach)
 claude.sh stop              # Stop root session
 claude.sh status            # Root session status
-claude.sh <project>         # Project session (start or reattach — delegates to claude-relay)
+claude.sh <project>         # Project session (start or reattach — delegates to claude-remote)
 claude.sh <project> stop    # Stop project session
 claude.sh <project> status  # Project session status
 claude.sh list              # All sessions + available projects
@@ -114,22 +114,22 @@ claude.sh list              # All sessions + available projects
 
 Stop the root session when not actively managing the relay (`claude.sh stop`). Project sessions stay always-on.
 
-### `claude-relay` — stateful session manager (root)
+### `claude-remote` — stateful session manager (root)
 
-Installed at `/usr/local/bin/claude-relay` by bootstrap (via the `project-sessions` skill).
+Installed at `/usr/local/bin/claude-remote` by bootstrap (via the `project-sessions` skill).
 
 ```bash
-claude-relay list                       List all projects + desired vs actual state
-claude-relay status [project]           Detailed status (falls back to list)
-claude-relay start <project>            Mark desired=running and start tmux (resumes latest)
-claude-relay stop <project>             Mark desired=stopped and kill tmux
-claude-relay restart <project>          Stop then start
-claude-relay rename <project> <label>   Set the Remote Control session label in config.json
-claude-relay reconcile                  Restart any desired=running project that's down
-claude-relay install                    Re-install symlinks and slash commands (rarely needed)
+claude-remote list                       List all projects + desired vs actual state
+claude-remote status [project]           Detailed status (falls back to list)
+claude-remote start <project>            Mark desired=running and start tmux (resumes latest)
+claude-remote stop <project>             Mark desired=stopped and kill tmux
+claude-remote restart <project>          Stop then start
+claude-remote rename <project> <label>   Set the Remote Control session label in config.json
+claude-remote reconcile                  Restart any desired=running project that's down
+claude-remote install                    Re-install symlinks and slash commands (rarely needed)
 ```
 
-State at `/var/lib/claude-relay/state.json`, log at `/var/log/claude-relay.log`.
+State at `/var/lib/claude-remote/state.json`, log at `/var/log/claude-remote.log`.
 
 ### Remote Control session labels
 
@@ -142,8 +142,8 @@ So a project provisioned with reference name "Rai" appears as `🛠️🌐 - Rai
 To change the label later:
 
 ```bash
-claude-relay rename rai "🚀 Rai Production"
-claude-relay restart rai
+claude-remote rename rai "🚀 Rai Production"
+claude-remote restart rai
 ```
 
 ### Slash commands (root Claude REPL)
@@ -152,18 +152,18 @@ Installed by bootstrap into `/root/.claude/commands/`:
 
 | Command | Action |
 |---|---|
-| `/list-projects` | `claude-relay list` |
-| `/project-status <name>` | `claude-relay status <name>` |
-| `/start-project <name>` | `claude-relay start <name>` |
-| `/stop-project <name>` | `claude-relay stop <name>` |
-| `/reconcile-projects` | `claude-relay reconcile` |
+| `/list-projects` | `claude-remote list` |
+| `/project-status <name>` | `claude-remote status <name>` |
+| `/start-project <name>` | `claude-remote start <name>` |
+| `/stop-project <name>` | `claude-remote stop <name>` |
+| `/reconcile-projects` | `claude-remote reconcile` |
 
 ### Cron
 
 Bootstrap offers to install:
 
 ```
-*/5 * * * * /usr/local/bin/claude-relay reconcile
+*/5 * * * * /usr/local/bin/claude-remote reconcile
 ```
 
 Pure shell, no LLM cost. See [`cron.example`](skills/project-sessions/references/cron.example) for an optional Haiku-driven hourly health check.

@@ -77,10 +77,10 @@ start_project() {
 
   if session_exists "$CLAUDE_USER" "$session"; then
     echo "Reattaching project session ($session)"
-  elif command -v claude-relay >/dev/null 2>&1; then
-    # Delegate to claude-relay so desired_state is recorded and the latest
+  elif command -v claude-remote >/dev/null 2>&1; then
+    # Delegate to claude-remote so desired_state is recorded and the latest
     # Claude session is resumed (not started fresh).
-    claude-relay start "$project"
+    claude-remote start "$project"
   else
     echo "Starting project session ($session) for $project"
     sudo -u "$CLAUDE_USER" tmux new-session -d -s "$session" -c "$dir" \
@@ -92,8 +92,8 @@ start_project() {
 stop_project() {
   local project="$1"
   local session; session="$(project_session "$project")"
-  if command -v claude-relay >/dev/null 2>&1; then
-    claude-relay stop "$project"
+  if command -v claude-remote >/dev/null 2>&1; then
+    claude-remote stop "$project"
   elif session_exists "$CLAUDE_USER" "$session"; then
     sudo -u "$CLAUDE_USER" tmux kill-session -t "$session"
     echo "Stopped $session"

@@ -172,7 +172,7 @@ fi
 # 8. SSH hardening: key-only, no root password login
 #------------------------------------------------------------------------------
 log "Hardening sshd"
-SSHD_DROPIN="/etc/ssh/sshd_config.d/99-claude-relay.conf"
+SSHD_DROPIN="/etc/ssh/sshd_config.d/99-claude-remote.conf"
 cat > "$SSHD_DROPIN" <<'EOF'
 PasswordAuthentication no
 PermitRootLogin prohibit-password
@@ -264,10 +264,10 @@ the lifecycle of project Claude sessions.
 
 ## Common tasks
 
-- List projects + state: `/list-projects` or `claude-relay list`
-- Start (resume latest session): `/start-project <name>` or `claude-relay start <name>`
-- Stop a project: `/stop-project <name>` or `claude-relay stop <name>`
-- Reconcile drift: `/reconcile-projects` or `claude-relay reconcile`
+- List projects + state: `/list-projects` or `claude-remote list`
+- Start (resume latest session): `/start-project <name>` or `claude-remote start <name>`
+- Stop a project: `/stop-project <name>` or `claude-remote stop <name>`
+- Reconcile drift: `/reconcile-projects` or `claude-remote reconcile`
 - Provision a new project: invoke the `server-sysadmin` skill
 - Root tmux session: `claude.sh` (start/reattach), `claude.sh stop`
 
@@ -291,12 +291,62 @@ if [[ ! -f "${CLAUDE_HOME}/.claude.json" ]]; then
 fi
 
 #------------------------------------------------------------------------------
-# 13. Chain into project-sessions install (if the sibling skill is present)
+# 13. Install Claude Code CLI for the claude user
+#------------------------------------------------------------------------------
+# The native installer is user-scoped (installs into ~/.local/share/claude/).
+# A `claude install` run as root does NOT make the binary available to the
+# claude user — and on multi-user hosts like this relay, that silently breaks
+# every project session. So we install per-user, here.
+#
+# On low-RAM VPSes (<1GB) the installer can OOM-kill itself during extraction
+# (it briefly maps ~70GB of virtual address space). To avoid that, if root
+# already has a copy of the binary we just clone it across — a file copy
+# doesn't blow the memory budget. Falls back to the official installer if
+# root doesn't have one yet.
+
+log "Installing Claude Code for ${CLAUDE_USER} user"
+CLAUDE_BIN_DIR="${CLAUDE_HOME}/.local/bin"
+CLAUDE_BIN="${CLAUDE_BIN_DIR}/claude"
+CLAUDE_VERSIONS_DIR="${CLAUDE_HOME}/.local/share/claude/versions"
+
+if sudo -u "$CLAUDE_USER" test -x "$CLAUDE_BIN"; then
+  ok "claude already installed for ${CLAUDE_USER} ($(sudo -u "$CLAUDE_USER" "$CLAUDE_BIN" --version 2>/dev/null || echo unknown))"
+elif [[ -d /root/.local/share/claude/versions ]] \
+     && [[ -n "$(ls -1 /root/.local/share/claude/versions/ 2>/dev/null)" ]]; then
+  ROOT_VERSION=$(ls -1 /root/.local/share/claude/versions/ | sort -V | tail -1)
+  ROOT_BIN="/root/.local/share/claude/versions/${ROOT_VERSION}"
+  if [[ -x "$ROOT_BIN" ]]; then
+    log "Copying root's claude $ROOT_VERSION to ${CLAUDE_USER} (skips OOM-prone re-install)"
+    install -d -o "$CLAUDE_USER" -g "$CLAUDE_USER" -m 0755 "$CLAUDE_BIN_DIR" "$CLAUDE_VERSIONS_DIR"
+    install -o "$CLAUDE_USER" -g "$CLAUDE_USER" -m 0755 \
+      "$ROOT_BIN" "${CLAUDE_VERSIONS_DIR}/${ROOT_VERSION}"
+    sudo -u "$CLAUDE_USER" ln -sfn "${CLAUDE_VERSIONS_DIR}/${ROOT_VERSION}" "$CLAUDE_BIN"
+    ok "claude $ROOT_VERSION installed for ${CLAUDE_USER}"
+  else
+    warn "/root/.local/share/claude/versions/${ROOT_VERSION} is not executable — falling back to installer"
+  fi
+fi
+
+if ! sudo -u "$CLAUDE_USER" test -x "$CLAUDE_BIN"; then
+  log "Running official claude installer as ${CLAUDE_USER}"
+  if [[ "$(awk '/MemTotal/ {print $2}' /proc/meminfo)" -lt 768000 ]]; then
+    warn "RAM under ~750MB — installer may OOM. If it fails, install claude for root first, then re-run this bootstrap (it will then clone root's copy)."
+  fi
+  sudo -u "$CLAUDE_USER" bash -lc 'curl -fsSL https://claude.ai/install.sh | bash' || true
+  if sudo -u "$CLAUDE_USER" test -x "$CLAUDE_BIN"; then
+    ok "claude installed for ${CLAUDE_USER}"
+  else
+    warn "claude install for ${CLAUDE_USER} did not produce $CLAUDE_BIN — install manually before starting project sessions"
+  fi
+fi
+
+#------------------------------------------------------------------------------
+# 14. Chain into project-sessions install (if the sibling skill is present)
 #------------------------------------------------------------------------------
 # Skill layout: skills/server-sysadmin-bootstrap/scripts/bootstrap.sh
-# Sibling:     skills/project-sessions/scripts/claude-relay
+# Sibling:     skills/project-sessions/scripts/claude-remote
 SKILLS_DIR="$(dirname "$(dirname "$SCRIPT_DIR")")"
-RELAY_CLI="${SKILLS_DIR}/project-sessions/scripts/claude-relay"
+RELAY_CLI="${SKILLS_DIR}/project-sessions/scripts/claude-remote"
 
 if [[ -x "$RELAY_CLI" ]]; then
   log "Chaining into project-sessions install"
@@ -304,7 +354,7 @@ if [[ -x "$RELAY_CLI" ]]; then
   ok "project-sessions installed"
 
   # Offer to install the cron reconciler.
-  CRON_LINE='*/5 * * * * /usr/local/bin/claude-relay reconcile'
+  CRON_LINE='*/5 * * * * /usr/local/bin/claude-remote reconcile'
   install_cron=0
   if [[ $ASSUME_YES -eq 1 ]]; then
     install_cron=1
@@ -314,18 +364,18 @@ if [[ -x "$RELAY_CLI" ]]; then
   fi
 
   if [[ $install_cron -eq 1 ]]; then
-    # Replace any existing claude-relay reconcile line, preserve the rest.
-    if (crontab -l 2>/dev/null | grep -v 'claude-relay reconcile'; echo "$CRON_LINE") | crontab -; then
+    # Replace any existing claude-remote reconcile line, preserve the rest.
+    if (crontab -l 2>/dev/null | grep -v 'claude-remote reconcile'; echo "$CRON_LINE") | crontab -; then
       ok "Cron reconciler installed for root"
     else
       warn "Failed to install cron entry — add manually:  ${CRON_LINE}"
     fi
   else
     echo "Skipped cron install. To add later:"
-    echo "    (crontab -l 2>/dev/null | grep -v 'claude-relay reconcile'; echo '$CRON_LINE') | crontab -"
+    echo "    (crontab -l 2>/dev/null | grep -v 'claude-remote reconcile'; echo '$CRON_LINE') | crontab -"
   fi
 else
-  warn "project-sessions skill not found alongside this one — skipping claude-relay install"
+  warn "project-sessions skill not found alongside this one — skipping claude-remote install"
   echo "    Expected at: $RELAY_CLI"
 fi
 
