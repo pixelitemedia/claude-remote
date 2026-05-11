@@ -23,10 +23,11 @@ Steps:
    ```bash
    sudo -u claude ssh-keygen -t ed25519 -N '' -C "claude@relay:<project>" -f /home/claude/<project>/key
    ```
-3. **Write `config.json`** with the host:
+3. **Write `config.json`** with the host and session label:
    ```json
    {
      "project": "<project>",
+     "session_label": "🛠️🌐 - <reference-name> Sysadmin",
      "hosts": [
        {
          "name": "<reference-name>",
@@ -38,19 +39,23 @@ Steps:
      ]
    }
    ```
-   If the user wants multiple hosts in one project, add them all here and pick one as `default: true`.
+   - `session_label` is the title shown in Remote Control's session picker. The convention is `🛠️🌐 - <ReferenceName> Sysadmin`. Confirm with the user — they may want a different emoji or wording.
+   - If the user wants multiple hosts in one project, add them all to `hosts` and pick one as `default: true`.
 4. **Write `CLAUDE.md`** — start from the template in `references/project-CLAUDE.md.template` (copy and fill in target-server details). Leave runbook sections as TODO stubs for the user to grow over time.
-5. **Install server-ssh skill** by copying `references/server-ssh/` into `/home/claude/<project>/.claude/skills/server-ssh/`. Ensure ownership is `claude:claude`.
+5. **Install server-ssh skill** by copying the sibling skill at `../server-ssh/` (i.e. `skills/server-ssh/` in the repo) into `/home/claude/<project>/.claude/skills/server-ssh/`. Ensure ownership is `claude:claude`.
 6. **Pre-authorize workspace trust** for `/home/claude/<project>` in `/home/claude/.claude.json` (create if missing). Set `projects["/home/claude/<project>"].hasTrustDialogAccepted = true`.
 7. **Print the `authorized_keys` line** for the user to paste on the target server:
    ```
    ✅ Project '<project>' provisioned.
+   Session label: 🛠️🌐 - <reference-name> Sysadmin
    Paste this on <hostname> as <user>:
 
        <contents of /home/claude/<project>/key.pub>
 
    Then start the session:
        claude-relay start <project>
+
+   (To change the label later: claude-relay rename <project> "<new label>")
    ```
 8. **Test SSH** (optional, ask the user first):
    ```bash

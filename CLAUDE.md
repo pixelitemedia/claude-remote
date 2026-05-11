@@ -35,9 +35,9 @@ Persisted relay state (managed by `claude-relay`):
 ## Skills in this repo
 
 - **`server-sysadmin-bootstrap`** — root Claude only. One-time per relay. Triggers: "set up sysadmin", "bootstrap this server". Hardens the VPS, creates the `claude` user, installs `claude.sh` and `claude-relay`, chains into `project-sessions install`, optionally adds the cron reconciler.
-- **`server-sysadmin`** — root Claude only. Once per target server. Triggers: "provision a new project", "add a server". Creates `/home/claude/<project>/` with keypair, `config.json`, project `CLAUDE.md`, and a bundled copy of `server-ssh`.
+- **`server-sysadmin`** — root Claude only. Once per target server. Triggers: "provision a new project", "add a server". Creates `/home/claude/<project>/` with keypair, `config.json` (including the Remote Control `session_label`), project `CLAUDE.md`, and a copy of `server-ssh`.
 - **`project-sessions`** — root Claude only. Used continuously. Ships `claude-relay` and slash commands (`/list-projects`, `/start-project`, `/stop-project`, `/reconcile-projects`, `/project-status`). State + reconciliation live here.
-- **`server-ssh`** — bundled with `server-sysadmin`, installed into each provisioned project. The operator skill for SSHing into target servers. Reads `config.json`, uses the project's local `key`, covers health checks / systemctl / journalctl / Docker / files / packages. Hard boundary: only SSHes to hosts in `config.json`.
+- **`server-ssh`** — top-level skill at `skills/server-ssh/`, copied by `server-sysadmin` into each provisioned project's `.claude/skills/server-ssh/`. **Only valid inside a project Claude session** — do not trigger from root Claude or from the repo top-level (no `config.json` there). Reads `config.json`, uses the project's local `key`, covers health checks / systemctl / journalctl / Docker / files / packages. Hard boundary: only SSHes to hosts in `config.json`.
 
 ## Behavioral constraints (gotchas)
 
@@ -50,6 +50,7 @@ These are baked into the scripts but matter when you write or modify them:
 5. **Use tmux**, not screen.
 6. **User-level systemd services** need `--user` on both `systemctl` and `journalctl`.
 7. **Starting a project should resume**, not reset: launch with `claude --continue remote-control`.
+8. **Each project session has a custom Remote Control label**: pass `--name "<label>"` to `claude remote-control`. The label lives in the project's `config.json` as `session_label`; default template is `🛠️🌐 - <ReferenceName> Sysadmin`. `claude-relay rename <project> "<label>"` updates it.
 
 ## Hard rules
 

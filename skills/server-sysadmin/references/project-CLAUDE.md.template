@@ -8,6 +8,21 @@ Project Claude session managing **{{REFERENCE_NAME}}** ({{HOSTNAME}}).
 - Available hosts are defined in `./config.json`.
 - Your private key is `./key`; matching public key on the target is `./key.pub`.
 
+## Remote Control session label
+
+This project appears in the phone's Remote Control session picker as:
+
+> **🛠️🌐 - {{REFERENCE_NAME}} Sysadmin**
+
+The label is stored in `./config.json` as `session_label`. To change it, edit that field and restart the session, or run as root on the relay:
+
+```bash
+claude-relay rename {{PROJECT_NAME}} "🛠️🌐 - {{REFERENCE_NAME}} Sysadmin"
+claude-relay restart {{PROJECT_NAME}}
+```
+
+The default template is `🛠️🌐 - <ReferenceName> Sysadmin`.
+
 ## Target: {{REFERENCE_NAME}}
 
 - **Hostname:** {{HOSTNAME}}

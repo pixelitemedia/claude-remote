@@ -101,6 +101,33 @@ discover_projects() {
     ! -name '.*' -printf '%f\n' | sort
 }
 
+# Resolve the Remote Control session label for a project:
+#   1. config.json "session_label" if set
+#   2. "🛠️🌐 - <default-host-name> Sysadmin"
+#   3. "🛠️🌐 - <project> Sysadmin" (capitalized)
+session_label() {
+  local project=$1
+  local cfg="$(project_dir "$project")/config.json"
+  python3 - "$cfg" "$project" <<'PY'
+import json, sys
+cfg_path, project = sys.argv[1:]
+default_template = f"🛠️🌐 - {project[:1].upper() + project[1:]} Sysadmin"
+try:
+    with open(cfg_path) as f:
+        cfg = json.load(f)
+except Exception:
+    print(default_template)
+    sys.exit()
+if cfg.get("session_label"):
+    print(cfg["session_label"])
+    sys.exit()
+hosts = cfg.get("hosts", [])
+default_host = next((h for h in hosts if h.get("default")), hosts[0] if hosts else None)
+ref = (default_host or {}).get("name") or project
+print(f"🛠️🌐 - {ref} Sysadmin")
+PY
+}
+
 #------------------------------------------------------------------------------
 # Core operations
 #------------------------------------------------------------------------------
@@ -117,16 +144,21 @@ start_tmux() {
     return 0
   fi
 
-  logmsg "starting $session ($dir)"
+  local label; label=$(session_label "$project")
+  # POSIX-safe quoting for the label inside the sh -c string tmux runs.
+  local label_esc; label_esc=$(python3 -c 'import shlex, sys; print(shlex.quote(sys.argv[1]))' "$label")
+
+  logmsg "starting $session ($dir) — label: $label"
   # --continue resumes the most recent Claude session in this workspace.
   # If no prior session exists, Claude Code falls back to a fresh one.
+  # --name sets the Remote Control session title (shown in the phone picker).
   sudo -u "$CLAUDE_USER" tmux new-session -d -s "$session" -c "$dir" \
-    "claude --continue remote-control"
+    "claude --continue remote-control --name $label_esc"
 
   # Give tmux a moment to register the session.
   sleep 0.5
   if session_running "$session"; then
-    say "${c_green}✓${c_reset} started $session"
+    say "${c_green}✓${c_reset} started $session (\"$label\")"
     logmsg "started $session"
   else
     logmsg "failed to start $session"
@@ -202,16 +234,41 @@ cmd_status() {
   last_reconciled=$(state_get "$project" last_reconciled); [[ -z "$last_reconciled" ]] && last_reconciled="-"
   if session_running "$session"; then actual="running"; else actual="stopped"; fi
 
+  local label; label=$(session_label "$project")
   cat <<EOF
 Project:           $project
 Directory:         $dir
 Tmux session:      $session
+Session label:     $label
 Desired state:     $desired
 Actual state:      $actual
 Last started:      $last
 Last stopped:      $last_stopped
 Last reconciled:   $last_reconciled
 EOF
+}
+
+cmd_rename() {
+  ensure_state
+  local project=${1:-}
+  local label=${2:-}
+  [[ -n "$project" && -n "$label" ]] || die "usage: claude-relay rename <project> <label>"
+  project_exists "$project" || die "project '$project' not found"
+
+  local cfg="$(project_dir "$project")/config.json"
+  [[ -f "$cfg" ]] || die "config.json missing at $cfg"
+
+  python3 - "$cfg" "$label" <<'PY'
+import json, sys
+cfg_path, label = sys.argv[1:]
+with open(cfg_path) as f:
+    cfg = json.load(f)
+cfg["session_label"] = label
+with open(cfg_path, "w") as f:
+    json.dump(cfg, f, indent=2)
+PY
+  say "${c_green}✓${c_reset} session_label set in $cfg"
+  say "Restart the project to apply: claude-relay restart $project"
 }
 
 cmd_start() {
@@ -312,6 +369,7 @@ case "${1:-list}" in
   start)       shift; cmd_start "$@" ;;
   stop)        shift; cmd_stop "$@" ;;
   restart)     shift; cmd_restart "$@" ;;
+  rename)      shift; cmd_rename "$@" ;;
   reconcile)   shift || true; cmd_reconcile "$@" ;;
   install)     shift || true; cmd_install "$@" ;;
   -h|--help|help)
@@ -319,14 +377,15 @@ case "${1:-list}" in
 Usage: claude-relay <command> [args]
 
 Commands:
-  list                List all projects with desired and actual states (default)
-  status [project]    Show detailed status (falls back to list if no project)
-  start <project>     Mark desired=running and start tmux (resumes latest session)
-  stop <project>      Mark desired=stopped and kill tmux session
-  restart <project>   Stop then start
-  reconcile           Restart any desired=running project whose session is down
-                      (intended for cron, every few minutes)
-  install             Symlink the CLI and slash commands; create state dir
+  list                       List all projects with desired and actual states (default)
+  status [project]           Show detailed status (falls back to list if no project)
+  start <project>            Mark desired=running and start tmux (resumes latest session)
+  stop <project>             Mark desired=stopped and kill tmux session
+  restart <project>          Stop then start
+  rename <project> <label>   Set the Remote Control session label in config.json
+  reconcile                  Restart any desired=running project whose session is down
+                             (intended for cron, every few minutes)
+  install                    Symlink the CLI and slash commands; create state dir
 EOF
     ;;
   *) die "unknown command: $1 (try --help)" ;;

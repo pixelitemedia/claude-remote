@@ -34,10 +34,10 @@ Phone → Remote Control → Relay VPS (Claude Code) → SSH → Target servers
 | [`skills/server-sysadmin-bootstrap/scripts/bootstrap.sh`](skills/server-sysadmin-bootstrap/scripts/bootstrap.sh) | Hardens the server and chains into other installs |
 | [`skills/server-sysadmin-bootstrap/scripts/claude.sh`](skills/server-sysadmin-bootstrap/scripts/claude.sh) | Root + project tmux session launcher |
 | [`skills/server-sysadmin/`](skills/server-sysadmin/) | Provisions per-target project workspaces |
-| [`skills/server-sysadmin/references/server-ssh/`](skills/server-sysadmin/references/server-ssh/) | Operator skill bundled into each project workspace |
 | [`skills/server-sysadmin/references/project-CLAUDE.md.template`](skills/server-sysadmin/references/project-CLAUDE.md.template) | Stub copied into new projects |
+| [`skills/server-ssh/`](skills/server-ssh/) | Operator skill — copied into each project workspace at provisioning time |
 | [`skills/project-sessions/`](skills/project-sessions/) | Stateful session manager (start/stop/reconcile) |
-| [`skills/project-sessions/scripts/claude-relay`](skills/project-sessions/scripts/claude-relay) | CLI: `list`, `status`, `start`, `stop`, `restart`, `reconcile`, `install` |
+| [`skills/project-sessions/scripts/claude-relay`](skills/project-sessions/scripts/claude-relay) | CLI: `list`, `status`, `start`, `stop`, `restart`, `rename`, `reconcile`, `install` |
 | [`skills/project-sessions/commands/`](skills/project-sessions/commands/) | Slash commands (`/list-projects`, `/start-project`, …) |
 | [`skills/project-sessions/references/cron.example`](skills/project-sessions/references/cron.example) | Reconcile cron snippet (+ optional Haiku check) |
 
@@ -119,16 +119,32 @@ Stop the root session when not actively managing the relay (`claude.sh stop`). P
 Installed at `/usr/local/bin/claude-relay` by bootstrap (via the `project-sessions` skill).
 
 ```bash
-claude-relay list                List all projects + desired vs actual state
-claude-relay status [project]    Detailed status (falls back to list)
-claude-relay start <project>     Mark desired=running and start tmux (resumes latest)
-claude-relay stop <project>      Mark desired=stopped and kill tmux
-claude-relay restart <project>   Stop then start
-claude-relay reconcile           Restart any desired=running project that's down
-claude-relay install             Re-install symlinks and slash commands (rarely needed)
+claude-relay list                       List all projects + desired vs actual state
+claude-relay status [project]           Detailed status (falls back to list)
+claude-relay start <project>            Mark desired=running and start tmux (resumes latest)
+claude-relay stop <project>             Mark desired=stopped and kill tmux
+claude-relay restart <project>          Stop then start
+claude-relay rename <project> <label>   Set the Remote Control session label in config.json
+claude-relay reconcile                  Restart any desired=running project that's down
+claude-relay install                    Re-install symlinks and slash commands (rarely needed)
 ```
 
 State at `/var/lib/claude-relay/state.json`, log at `/var/log/claude-relay.log`.
+
+### Remote Control session labels
+
+Each project session shows up in the phone's session picker with a custom label. The default is:
+
+> **🛠️🌐 - `<ReferenceName>` Sysadmin**
+
+So a project provisioned with reference name "Rai" appears as `🛠️🌐 - Rai Sysadmin`. The label is stored in the project's `config.json` under `session_label` and is passed to `claude remote-control --name "<label>"` when the tmux session is started.
+
+To change the label later:
+
+```bash
+claude-relay rename rai "🚀 Rai Production"
+claude-relay restart rai
+```
 
 ### Slash commands (root Claude REPL)
 

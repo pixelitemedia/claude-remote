@@ -1,6 +1,6 @@
 ---
 name: server-ssh
-description: SSH operator for the project's target servers. Use this skill whenever the user asks to check status, view logs, restart services, inspect Docker containers, read or edit files, manage packages, or run any administrative command on a remote host owned by this project. Hosts are defined in ./config.json (relative to the project's CLAUDE.md) — only SSH to hosts listed there. Trigger on phrases like "check the server", "restart X on <host>", "pull logs from <host>", "what's running on <host>", or any operational question that requires shell access to a remote machine. Do NOT use for managing the relay VPS itself — that's the root Claude's job.
+description: SSH operator for a relay project's target servers. Only valid inside a project Claude session running from /home/claude/<project>/ — that directory must contain config.json (the host list) and key (the ed25519 private key). Use whenever the user asks to check status, view logs, restart services, inspect Docker containers, read or edit files, manage packages, or run any administrative command on a remote host owned by this project. Trigger on phrases like "check the server", "restart X on <host>", "pull logs from <host>", "what's running on <host>", or any operational question that requires shell access to the target. Do NOT trigger from the root relay Claude or from this repo's top-level — there is no config.json there. Do NOT use to manage the relay VPS itself (that is root Claude's job via the server-sysadmin / project-sessions skills).
 ---
 
 # server-ssh
