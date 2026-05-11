@@ -13,11 +13,12 @@ Phone → Remote Control → Relay VPS (Claude Code) → SSH → Target servers
 | Path | Purpose |
 |---|---|
 | [`CLAUDE.md`](CLAUDE.md) | Project-wide context for Claude Code |
-| [`server-sysadmin/`](server-sysadmin/) | Installer/provisioner skill, run by root Claude on the relay |
-| [`server-sysadmin/scripts/bootstrap.sh`](server-sysadmin/scripts/bootstrap.sh) | One-time relay VPS hardening + install |
-| [`server-sysadmin/scripts/claude.sh`](server-sysadmin/scripts/claude.sh) | tmux session launcher (`claude.sh [project] [stop\|status]`) |
-| [`server-sysadmin/references/server-ssh/`](server-sysadmin/references/server-ssh/) | Operator skill bundled into each project workspace |
-| [`server-sysadmin/references/project-CLAUDE.md.template`](server-sysadmin/references/project-CLAUDE.md.template) | Stub copied into new projects |
+| [`skills/`](skills/) | Skills used by the relay |
+| [`skills/server-sysadmin/`](skills/server-sysadmin/) | Installer/provisioner skill, run by root Claude on the relay |
+| [`skills/server-sysadmin/scripts/bootstrap.sh`](skills/server-sysadmin/scripts/bootstrap.sh) | One-time relay VPS hardening + install |
+| [`skills/server-sysadmin/scripts/claude.sh`](skills/server-sysadmin/scripts/claude.sh) | tmux session launcher (`claude.sh [project] [stop\|status]`) |
+| [`skills/server-sysadmin/references/server-ssh/`](skills/server-sysadmin/references/server-ssh/) | Operator skill bundled into each project workspace |
+| [`skills/server-sysadmin/references/project-CLAUDE.md.template`](skills/server-sysadmin/references/project-CLAUDE.md.template) | Stub copied into new projects |
 
 ## Getting started
 
