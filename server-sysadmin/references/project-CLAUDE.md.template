@@ -1,0 +1,45 @@
+# {{PROJECT_NAME}} — Claude project on relay
+
+Project Claude session managing **{{REFERENCE_NAME}}** ({{HOSTNAME}}).
+
+## How you work
+
+- Use the `server-ssh` skill for any operation on a target server.
+- Available hosts are defined in `./config.json`.
+- Your private key is `./key`; matching public key on the target is `./key.pub`.
+
+## Target: {{REFERENCE_NAME}}
+
+- **Hostname:** {{HOSTNAME}}
+- **User:** {{USER}}
+- **Role:** TODO — describe what this server does
+- **Stack:** TODO — list relevant services / containers / runtimes
+
+## Services
+
+TODO — list the systemd units, Docker containers, or user services this server runs. Include:
+
+- Unit / container name
+- What it does
+- How to restart it safely
+- Where its logs live
+
+## Files and paths
+
+TODO — config files, data directories, log locations the user cares about.
+
+## Runbooks
+
+TODO — common operations:
+
+- How to deploy / update
+- How to check health
+- How to recover from common failures
+
+## Known issues / gotchas
+
+TODO — accumulate as you discover them.
+
+## References
+
+TODO — external dashboards, repos, docs.

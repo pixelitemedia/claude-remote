@@ -1,0 +1,13 @@
+.DS_Store
+*.swp
+*.swo
+
+# Never commit any actual provisioned project keys or configs that may end up here
+key
+key.pub
+*.pem
+authorized_keys
+
+# Local Claude Code state
+.claude/
+!server-sysadmin/references/**/.claude/
