@@ -5,7 +5,9 @@ description: Manage relay project Claude sessions — list, start, stop, restart
 
 # project-sessions
 
-You manage Claude project sessions on the relay VPS. Each project is a tmux session running `claude --continue remote-control` from `/home/claude/<project>/` as the `claude` user. Start/stop is recorded in a state file so a cron reconciler can bring back anything that crashed.
+You manage Claude project sessions on the relay VPS. Each project is a tmux session running `claude --remote-control -n "<label>"` from `/home/claude/<project>/` as the `claude` user — single-session Remote Control mode. Start/stop is recorded in a state file so a cron reconciler can bring back anything that crashed. The reconciler **resumes** the prior session (not fresh-starts) so conversation history is preserved across crashes.
+
+Important: this is the top-level `--remote-control` flag, **not** the `claude remote-control` subcommand. The subcommand is a multi-session daemon (capacity 32) but has no `--continue`/`--resume` support — sessions disappear from the picker on every restart. The flag form is single-session (capacity 1) but supports resume, which is what we want for phone-driven continuity.
 
 ## Tooling
 
@@ -14,10 +16,13 @@ Everything is built on one CLI: **`claude-remote`** (installed at `/usr/local/bi
 ```
 claude-remote list                List all projects + desired vs actual state
 claude-remote status [project]    Detailed status (falls back to list)
-claude-remote start <project>     Mark desired=running, start tmux session (resumes latest Claude session)
+claude-remote start <project>     Mark desired=running, start tmux (fresh session)
+claude-remote resume <project>    Mark desired=running, start tmux, resume the
+                                  latest prior session for the workspace
 claude-remote stop <project>      Mark desired=stopped, kill tmux session
-claude-remote restart <project>   Stop then start
-claude-remote reconcile           For each desired=running project, restart if its session is down
+claude-remote restart <project>   Stop then start (fresh)
+claude-remote reconcile           For each desired=running project that's down,
+                                  bring it back via resume (history preserved)
 claude-remote install             Symlink the CLI and slash commands; create state dir
 ```
 
@@ -31,9 +36,10 @@ Once `claude-remote install` has run, these are available in root Claude:
 |---|---|
 | `/list-projects` | `claude-remote list` |
 | `/project-status <name>` | `claude-remote status <name>` |
-| `/start-project <name>` | `claude-remote start <name>` |
+| `/start-project <name>` | `claude-remote start <name>` (fresh) |
+| `/resume-project <name>` | `claude-remote resume <name>` (continue latest) |
 | `/stop-project <name>` | `claude-remote stop <name>` |
-| `/reconcile-projects` | `claude-remote reconcile` |
+| `/reconcile-projects` | `claude-remote reconcile` (resumes drifted projects) |
 
 If a slash command is missing the argument, ask the user — but show them `claude-remote list` first so they can pick from existing projects.
 
@@ -59,8 +65,10 @@ To enable monitoring (after confirming with the user):
 
 ## Key behaviors
 
-- **Start resumes**, doesn't reset. `claude-remote start <project>` invokes `claude --continue remote-control` so the latest Claude session in that workspace reattaches with its history intact. If no prior session exists, Claude Code falls back to a fresh one.
-- **State drift is highlighted** in `list` output: red row = desired running but actually stopped (will be restarted by reconcile); yellow row = desired stopped but actually running (user started it manually — leave alone unless asked).
+- **`start` launches a fresh single-session Remote Control daemon**. No prior history. Use this when you want a clean conversation.
+- **`resume` launches the latest prior session under Remote Control** — `claude-remote` looks up the most-recently-modified `.jsonl` in `~/.claude/projects/<encoded-workspace>/` and invokes `claude -r <sid> --remote-control -n "<label>" ''`. The trailing empty-string positional satisfies the CLI's "prompt required when resuming under RC" check without pushing a new user message. If no prior session exists, falls back to fresh `start`.
+- **Reconcile resumes**, not fresh-starts. This is the main user-visible benefit of single-session mode: a crashed/restarted daemon comes back with the prior conversation intact.
+- **State drift is highlighted** in `list` output: red row = desired running but actually stopped (will be resumed by reconcile within ~5min); yellow row = desired stopped but actually running (user started it manually — leave alone unless asked).
 - **Reconcile only acts on desired=running** projects. It never auto-stops a project the user started via `claude.sh` directly.
 - **Stop sets desired=stopped**, so reconcile won't fight you. Use this when intentionally taking a project offline.
 - **State file is the source of truth for intent**, not for actual state. Actual state is always queried live via `tmux has-session`.

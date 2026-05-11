@@ -89,8 +89,8 @@ You: /start-project rai
 
 Or equivalently `claude-remote start rai`. This:
 - Marks `desired_state=running` in `/var/lib/claude-remote/state.json`
-- Launches `claude --continue remote-control` inside tmux, resuming the latest session (not starting fresh)
-- The cron reconciler will bring it back if it ever crashes
+- Launches `claude --remote-control -n "<label>"` inside tmux — a fresh single-session Remote Control daemon
+- The cron reconciler will **resume** it (preserving conversation history) if it ever crashes — see `claude-remote resume` / `/resume-project` to manually resume the latest prior session
 
 ### 4. Connect from your phone
 
@@ -121,11 +121,14 @@ Installed at `/usr/local/bin/claude-remote` by bootstrap (via the `project-sessi
 ```bash
 claude-remote list                       List all projects + desired vs actual state
 claude-remote status [project]           Detailed status (falls back to list)
-claude-remote start <project>            Mark desired=running and start tmux (resumes latest)
+claude-remote start <project>            Mark desired=running and start tmux (fresh session)
+claude-remote resume <project>           Mark desired=running and start tmux, resuming
+                                         the latest prior session for the workspace
 claude-remote stop <project>             Mark desired=stopped and kill tmux
-claude-remote restart <project>          Stop then start
+claude-remote restart <project>          Stop then start (fresh)
 claude-remote rename <project> <label>   Set the Remote Control session label in config.json
-claude-remote reconcile                  Restart any desired=running project that's down
+claude-remote reconcile                  For each desired=running project that's down,
+                                         bring it back via resume (history preserved)
 claude-remote install                    Re-install symlinks and slash commands (rarely needed)
 ```
 
@@ -137,7 +140,7 @@ Each project session shows up in the phone's session picker with a custom label.
 
 > **🛠️🌐 - `<ReferenceName>` Sysadmin**
 
-So a project provisioned with reference name "Rai" appears as `🛠️🌐 - Rai Sysadmin`. The label is stored in the project's `config.json` under `session_label` and is passed to `claude remote-control --name "<label>"` when the tmux session is started.
+So a project provisioned with reference name "Rai" appears as `🛠️🌐 - Rai Sysadmin`. The label is stored in the project's `config.json` under `session_label` and is passed to `claude --remote-control -n "<label>"` (or `claude -r <sid> --remote-control -n "<label>" ''` when resuming) when the tmux session is started.
 
 To change the label later:
 

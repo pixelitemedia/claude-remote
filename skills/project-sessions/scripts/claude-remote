@@ -132,6 +132,19 @@ PY
 # Core operations
 #------------------------------------------------------------------------------
 
+# Find the most recently modified session file (.jsonl) for a project's
+# workspace. Claude Code stores sessions per-user under
+# ~/.claude/projects/<encoded-workspace>/<UUID>.jsonl, where the encoded
+# workspace is the absolute path with '/' replaced by '-'.
+latest_session_id() {
+  local project=$1
+  local dir; dir=$(project_dir "$project")
+  local encoded="${dir//\//-}"
+  local sessions_dir="${CLAUDE_HOME}/.claude/projects/${encoded}"
+  [[ -d "$sessions_dir" ]] || return 1
+  ls -t "$sessions_dir"/*.jsonl 2>/dev/null | head -1 | xargs -I{} basename {} .jsonl
+}
+
 start_tmux() {
   local project=$1
   local dir; dir=$(project_dir "$project")
@@ -149,12 +162,14 @@ start_tmux() {
   local label_esc; label_esc=$(python3 -c 'import shlex, sys; print(shlex.quote(sys.argv[1]))' "$label")
 
   logmsg "starting $session ($dir) — label: $label"
-  # remote-control is a long-lived daemon; sessions are spawned/resumed from
-  # the web UI, so --continue is not used at the daemon level (and the current
-  # CLI rejects it in combination with remote-control).
-  # --name sets the Remote Control session title (shown in the phone picker).
+  # Top-level --remote-control flag (single-session mode) — required so that
+  # 'resume' (which combines -r/--continue with --remote-control) works on
+  # the same CLI. The 'claude remote-control' SUBCOMMAND is a multi-session
+  # daemon but has no --continue/--resume support, so sessions disappear from
+  # the picker on restart. Capacity drops to 1, which is fine for the
+  # phone-driven single-user case.
   sudo -u "$CLAUDE_USER" tmux new-session -d -s "$session" -c "$dir" \
-    "$CLAUDE_HOME/.local/bin/claude remote-control --name $label_esc"
+    "$CLAUDE_HOME/.local/bin/claude --remote-control -n $label_esc"
 
   # Give tmux a moment to register the session.
   sleep 0.5
@@ -163,6 +178,47 @@ start_tmux() {
     logmsg "started $session"
   else
     logmsg "failed to start $session"
+    die "tmux session $session did not come up — check 'sudo -u $CLAUDE_USER tmux ls'"
+  fi
+}
+
+# Resume the most recent prior session for a project under Remote Control.
+# Falls back to start_tmux (fresh) if no prior session exists.
+start_tmux_resume() {
+  local project=$1
+  local dir; dir=$(project_dir "$project")
+  local session; session=$(project_session "$project")
+
+  project_exists "$project" || die "project '$project' not found at $dir"
+
+  if session_running "$session"; then
+    say "${c_yellow}~${c_reset} $session already running"
+    return 0
+  fi
+
+  local sid; sid=$(latest_session_id "$project" 2>/dev/null || true)
+  if [[ -z "$sid" ]]; then
+    say "${c_yellow}!${c_reset} no prior session found for $project — falling back to fresh start"
+    start_tmux "$project"
+    return $?
+  fi
+
+  local label; label=$(session_label "$project")
+  local label_esc; label_esc=$(python3 -c 'import shlex, sys; print(shlex.quote(sys.argv[1]))' "$label")
+
+  logmsg "resuming $session ($dir) — sid: $sid — label: $label"
+  # -r <uuid> --remote-control -n <label> '' — the trailing empty-string
+  # positional satisfies the CLI's "prompt required when resuming under
+  # remote-control" check without actually pushing a new user message.
+  sudo -u "$CLAUDE_USER" tmux new-session -d -s "$session" -c "$dir" \
+    "$CLAUDE_HOME/.local/bin/claude -r $sid --remote-control -n $label_esc ''"
+
+  sleep 0.5
+  if session_running "$session"; then
+    say "${c_green}✓${c_reset} resumed $session (\"$label\", sid ${sid:0:8})"
+    logmsg "resumed $session"
+  else
+    logmsg "failed to resume $session"
     die "tmux session $session did not come up — check 'sudo -u $CLAUDE_USER tmux ls'"
   fi
 }
@@ -280,6 +336,14 @@ cmd_start() {
   start_tmux "$project"
 }
 
+cmd_resume() {
+  ensure_state
+  local project=${1:-}
+  [[ -n "$project" ]] || die "usage: claude-remote resume <project>"
+  state_update "$project" desired_state=running last_started="$(ts)"
+  start_tmux_resume "$project"
+}
+
 cmd_stop() {
   ensure_state
   local project=${1:-}
@@ -307,11 +371,11 @@ cmd_reconcile() {
       continue
     fi
     drift=$((drift + 1))
-    logmsg "reconcile: $p desired=running but session down — restarting"
-    if start_tmux "$p"; then
+    logmsg "reconcile: $p desired=running but session down — resuming"
+    if start_tmux_resume "$p"; then
       state_update "$p" last_reconciled="$(ts)" last_started="$(ts)"
     else
-      logmsg "reconcile: $p restart failed"
+      logmsg "reconcile: $p resume failed"
     fi
   done
   if [[ $drift -eq 0 ]]; then
@@ -368,6 +432,7 @@ case "${1:-list}" in
   list)        shift || true; cmd_list "$@" ;;
   status)      shift; cmd_status "$@" ;;
   start)       shift; cmd_start "$@" ;;
+  resume)      shift; cmd_resume "$@" ;;
   stop)        shift; cmd_stop "$@" ;;
   restart)     shift; cmd_restart "$@" ;;
   rename)      shift; cmd_rename "$@" ;;
@@ -380,12 +445,15 @@ Usage: claude-remote <command> [args]
 Commands:
   list                       List all projects with desired and actual states (default)
   status [project]           Show detailed status (falls back to list if no project)
-  start <project>            Mark desired=running and start tmux (resumes latest session)
+  start <project>            Mark desired=running and start tmux (fresh session)
+  resume <project>           Mark desired=running and start tmux, resuming the
+                             latest prior session for that project's workspace
   stop <project>             Mark desired=stopped and kill tmux session
-  restart <project>          Stop then start
+  restart <project>          Stop then start (fresh)
   rename <project> <label>   Set the Remote Control session label in config.json
-  reconcile                  Restart any desired=running project whose session is down
-                             (intended for cron, every few minutes)
+  reconcile                  For any desired=running project whose session is
+                             down, bring it back via 'resume' (intended for
+                             cron, every few minutes)
   install                    Symlink the CLI and slash commands; create state dir
 EOF
     ;;

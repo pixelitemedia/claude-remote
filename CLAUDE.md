@@ -46,11 +46,11 @@ These are baked into the scripts but matter when you write or modify them:
 1. **SSH commands must use** `-T -o BatchMode=yes -o StrictHostKeyChecking=no -o ConnectTimeout=10` or they hang in non-interactive sessions.
 2. **Workspace trust must be pre-set** (`hasTrustDialogAccepted: true` in `~/.claude.json`) or Claude sits at the trust dialog.
 3. **`--dangerously-skip-permissions` is blocked in Remote Control sessions** by design. For root, use `allowBypassPermissions: true` in `/root/.claude/settings.json` instead.
-4. **`claude remote-control`** is a positional subcommand, not `--remote-control`.
+4. **Remote Control: use the top-level `--remote-control` flag, not the `remote-control` subcommand.** Subcommand = multi-session daemon (capacity 32) with no `--continue`/`--resume` support — sessions disappear from the picker on every restart. Flag = single-session (capacity 1, fine for phone-driven use) and is the only form that combines with `-r`/`--continue` for real resume.
 5. **Use tmux**, not screen.
 6. **User-level systemd services** need `--user` on both `systemctl` and `journalctl`.
-7. **`claude remote-control` is a long-lived daemon**, not a session command — individual sessions are spawned and resumed from the web UI inside it. Do **not** pass `--continue`; the current CLI rejects `--name` when `--continue` is also present.
-8. **Each project session has a custom Remote Control label**: pass `--name "<label>"` to `claude remote-control`. The label lives in the project's `config.json` as `session_label`; default template is `🛠️🌐 - <ReferenceName> Sysadmin`. `claude-remote rename <project> "<label>"` updates it.
+7. **Resuming a Remote Control session requires `-r <session-id>` and a trailing empty-string positional prompt arg**: `claude -r <sid> --remote-control -n "<label>" ''`. The trailing `''` satisfies the CLI's "prompt required when resuming under RC" check without pushing a new user message; without it the daemon waits for stdin and exits. `-c` (continue most recent) alone fails with "No conversation found to continue" under RC — you must look up the latest session ID. `claude-remote resume` and `reconcile` do the lookup from `~/.claude/projects/<encoded-workspace>/*.jsonl` (newest mtime wins).
+8. **Each project session has a custom Remote Control label**: pass `-n "<label>"` to `claude --remote-control` (and to the resume invocation). The label lives in the project's `config.json` as `session_label`; default template is `🛠️🌐 - <ReferenceName> Sysadmin`. `claude-remote rename <project> "<label>"` updates it.
 9. **`sudo -u <user>` strips PATH**, so `~/.local/bin` (where the user-scoped `claude` lives) is not searched. When invoking `claude` for the relay's `claude` user via sudo/tmux, use the absolute path `/home/claude/.local/bin/claude` — `bash -lc` works too but quoting gets messy when labels contain spaces/emoji.
 
 ## Hard rules
