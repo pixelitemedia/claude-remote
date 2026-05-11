@@ -30,7 +30,26 @@ claude-remote restart <project>          Stop then start (fresh)
 claude-remote reconcile                  For each desired=running project that's down,
                                          bring it back via resume (history preserved)
 claude-remote install                    Symlink the CLI and slash commands; create state dir
+claude-remote root <subcommand>          Manage the root (operator) session — opt-in
+                                         persistence. Subcommands mirror the project ones:
+                                         status, start, resume [sid], stop, restart,
+                                         sessions, rename <label>.
 ```
+
+### Root session (opt-in)
+
+The root session — root Claude managing the relay itself — is **not tracked by default**. The classic flow is `claude.sh` → start/attach → `claude.sh stop` when idle. To make root persistent (auto-resume on crash):
+
+```bash
+claude-remote root start          # mark desired=running, start fresh
+claude-remote root resume         # mark desired=running, resume latest prior session
+claude-remote root sessions       # pick a specific prior session
+claude-remote root stop           # mark desired=stopped, kill tmux (disenrolls from reconcile)
+```
+
+State for root lives under `state.json` → `root` (label, desired_state, last_started/stopped/reconciled). The reconciler treats `root.desired_state=running` exactly like a project: if the tmux session is down, resume via `claude -r <sid> --remote-control -n "<label>" ''`.
+
+Default label is `🛠️🌐 - Relay Root`; override with `claude-remote root rename "<label>"`.
 
 State lives at `/var/lib/claude-remote/state.json`. Log lives at `/var/log/claude-remote.log`.
 

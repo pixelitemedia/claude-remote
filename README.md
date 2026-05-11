@@ -135,9 +135,28 @@ claude-remote rename <project> <label>   Set the Remote Control session label in
 claude-remote reconcile                  For each desired=running project that's down,
                                          bring it back via resume (history preserved)
 claude-remote install                    Re-install symlinks and slash commands (rarely needed)
+claude-remote root <subcommand>          Manage the root (operator) session — see below
 ```
 
 State at `/var/lib/claude-remote/state.json`, log at `/var/log/claude-remote.log`.
+
+### Persistent root session (opt-in)
+
+The root session (root Claude managing the relay itself) is normally transient — `claude.sh` to start/attach, `claude.sh stop` when idle. To make it persistent so the cron reconciler resumes it on crash:
+
+```bash
+claude-remote root start            # start fresh; mark desired=running
+claude-remote root resume           # resume latest prior session; mark desired=running
+claude-remote root resume <sid>     # resume a specific session
+claude-remote root sessions         # interactive picker over prior sessions
+claude-remote root stop             # mark desired=stopped (disenrolls from reconcile)
+claude-remote root status           # current state (running, desired, label)
+claude-remote root rename "<label>" # change the Remote Control label (default "🛠️🌐 - Relay Root")
+```
+
+Once `desired_state=running` is set, the reconciler treats root just like any other project: if the `claude-root` tmux session goes down, it gets resumed (history preserved) on the next cron tick. Stopping with `claude-remote root stop` disenrolls it — useful when you're done administering for the night and want the reconciler to leave it alone.
+
+State for root lives under `state.json`'s top-level `root` object (separate from `projects`). The label, last-started/stopped/reconciled timestamps, and the desired state all live there.
 
 ### Picking a specific prior session
 

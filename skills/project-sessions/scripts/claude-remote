@@ -15,6 +15,14 @@ STATE_DIR="/var/lib/claude-remote"
 STATE_FILE="${STATE_DIR}/state.json"
 LOG_FILE="/var/log/claude-remote.log"
 
+# Root (operator) session — separate from projects. State lives under
+# state.json's top-level "root" object; persistence is opt-in (set by
+# `claude-remote root start` / `resume`, cleared by `root stop`).
+ROOT_SESSION="claude-root"
+ROOT_DIR="/root"
+ROOT_CLAUDE_BIN="/root/.local/bin/claude"
+ROOT_DEFAULT_LABEL="🛠️🌐 - Relay Root"
+
 c_blue=$'\033[1;34m'
 c_green=$'\033[1;32m'
 c_red=$'\033[1;31m'
@@ -372,6 +380,23 @@ cmd_list() {
       printf '%-20s %-10s %-10s %s\n' "$p" "$desired" "$actual" "$last"
     fi
   done <<< "$projects"
+
+  # Root session footer (only if tracked or currently running)
+  local root_desired root_actual root_last
+  root_desired=$(root_state_get desired_state)
+  if root_session_running; then root_actual="running"; else root_actual="stopped"; fi
+  if [[ -n "$root_desired" || "$root_actual" == "running" ]]; then
+    [[ -z "$root_desired" ]] && root_desired="(untracked)"
+    root_last=$(root_state_get last_started); [[ -z "$root_last" ]] && root_last="-"
+    echo
+    if [[ "$root_desired" == "running" && "$root_actual" != "running" ]]; then
+      printf '%s%-20s %-10s %-10s %s%s\n' "$c_red" "<root>" "$root_desired" "$root_actual" "$root_last" "$c_reset"
+    elif [[ "$root_desired" != "running" && "$root_actual" == "running" ]]; then
+      printf '%s%-20s %-10s %-10s %s%s\n' "$c_yellow" "<root>" "$root_desired" "$root_actual" "$root_last" "$c_reset"
+    else
+      printf '%-20s %-10s %-10s %s\n' "<root>" "$root_desired" "$root_actual" "$root_last"
+    fi
+  fi
 }
 
 cmd_status() {
@@ -515,6 +540,25 @@ cmd_restart() {
 cmd_reconcile() {
   ensure_state
   local drift=0 total=0
+
+  # --- Root session reconcile (opt-in: only if state.root.desired_state=running)
+  local root_desired
+  root_desired=$(root_state_get desired_state)
+  if [[ "$root_desired" == "running" ]]; then
+    total=$((total + 1))
+    if ! root_session_running; then
+      drift=$((drift + 1))
+      logmsg "reconcile: root desired=running but session down — resuming"
+      local rsid; rsid=$(root_latest_session_id 2>/dev/null || true)
+      if start_root_tmux "$rsid"; then
+        root_state_update last_reconciled="$(ts)" last_started="$(ts)"
+      else
+        logmsg "reconcile: root resume failed"
+      fi
+    fi
+  fi
+
+  # --- Projects
   for p in $(state_projects); do
     total=$((total + 1))
     local desired
@@ -534,6 +578,316 @@ cmd_reconcile() {
   if [[ $drift -eq 0 ]]; then
     logmsg "reconcile: ok ($total tracked, no drift)"
   fi
+}
+
+#------------------------------------------------------------------------------
+# Root (operator) session — opt-in persistence
+#------------------------------------------------------------------------------
+
+root_state_get() {
+  python3 - "$STATE_FILE" "$1" <<'PY'
+import json, sys
+state_file, key = sys.argv[1:]
+with open(state_file) as f:
+    data = json.load(f)
+print(data.get("root", {}).get(key, ""))
+PY
+}
+
+root_state_update() {
+  python3 - "$STATE_FILE" "$@" <<'PY'
+import json, sys
+state_file, *kvs = sys.argv[1:]
+with open(state_file) as f:
+    data = json.load(f)
+root = data.setdefault("root", {})
+for kv in kvs:
+    k, _, v = kv.partition("=")
+    if v == "__delete__":
+        root.pop(k, None)
+    else:
+        root[k] = v
+with open(state_file, "w") as f:
+    json.dump(data, f, indent=2, sort_keys=True)
+PY
+}
+
+root_label() {
+  local label; label=$(root_state_get label)
+  [[ -z "$label" ]] && label="$ROOT_DEFAULT_LABEL"
+  printf '%s' "$label"
+}
+
+root_session_running() {
+  tmux has-session -t "$ROOT_SESSION" 2>/dev/null
+}
+
+# /root encodes to "-root" under ~/.claude/projects/
+root_sessions_dir() { printf '%s' "/root/.claude/projects/-root"; }
+
+root_latest_session_id() {
+  local sdir; sdir=$(root_sessions_dir)
+  [[ -d "$sdir" ]] || return 1
+  ls -t "$sdir"/*.jsonl 2>/dev/null | head -1 | xargs -I{} basename {} .jsonl
+}
+
+root_resolve_session_id() {
+  local query=$1
+  local sdir; sdir=$(root_sessions_dir)
+  [[ -d "$sdir" ]] || return 1
+  if [[ -f "$sdir/$query.jsonl" ]]; then
+    printf '%s' "$query"
+    return 0
+  fi
+  mapfile -t matches < <(find "$sdir" -maxdepth 1 -name "${query}*.jsonl" 2>/dev/null)
+  case ${#matches[@]} in
+    0) return 1 ;;
+    1) basename "${matches[0]}" .jsonl ;;
+    *) printf 'ambiguous: %d sessions match prefix %s\n' "${#matches[@]}" "$query" >&2; return 2 ;;
+  esac
+}
+
+list_root_sessions_json() {
+  local sdir; sdir=$(root_sessions_dir)
+  python3 - "$sdir" <<'PY'
+import json, sys
+from pathlib import Path
+from datetime import datetime
+sdir = Path(sys.argv[1])
+out = []
+if sdir.is_dir():
+    files = sorted(sdir.glob('*.jsonl'), key=lambda p: p.stat().st_mtime, reverse=True)
+    for f in files:
+        sid = f.stem
+        st = f.stat()
+        mtime = datetime.fromtimestamp(st.st_mtime)
+        preview = ""
+        msgs = 0
+        try:
+            with open(f, encoding="utf-8", errors="replace") as fh:
+                for line in fh:
+                    msgs += 1
+                    if preview:
+                        continue
+                    try:
+                        obj = json.loads(line)
+                    except Exception:
+                        continue
+                    if obj.get("type") != "user":
+                        continue
+                    content = obj.get("message", {}).get("content", "")
+                    if isinstance(content, list):
+                        for c in content:
+                            if isinstance(c, dict) and c.get("type") == "text":
+                                preview = c.get("text", "") or ""
+                                break
+                    elif isinstance(content, str):
+                        preview = content
+        except Exception:
+            pass
+        preview = " ".join(preview.split())
+        if len(preview) > 70:
+            preview = preview[:67] + "..."
+        out.append({
+            "sid": sid,
+            "mtime_h": mtime.strftime("%Y-%m-%d %H:%M"),
+            "msgs": msgs,
+            "preview": preview,
+        })
+print(json.dumps(out))
+PY
+}
+
+# start_root_tmux [session_id]
+#   - With sid: resume that session (stops current if a different one is up)
+#   - Without sid: start a fresh session
+start_root_tmux() {
+  local explicit_sid=${1:-}
+  [[ -x "$ROOT_CLAUDE_BIN" ]] \
+    || die "claude not installed for root at $ROOT_CLAUDE_BIN — run the installer as root first"
+
+  local sid=""
+  if [[ -n "$explicit_sid" ]]; then
+    if ! sid=$(root_resolve_session_id "$explicit_sid"); then
+      die "no root session matching '$explicit_sid' (check 'claude-remote root sessions')"
+    fi
+  fi
+
+  if root_session_running; then
+    if [[ -n "$sid" ]]; then
+      say "${c_blue}==>${c_reset} stopping $ROOT_SESSION to swap to ${sid:0:8}"
+      logmsg "stopping $ROOT_SESSION to swap to $sid"
+      tmux kill-session -t "$ROOT_SESSION"
+      sleep 0.3
+    else
+      say "${c_yellow}~${c_reset} $ROOT_SESSION already running"
+      return 0
+    fi
+  fi
+
+  local label; label=$(root_label)
+  local label_esc; label_esc=$(python3 -c 'import shlex, sys; print(shlex.quote(sys.argv[1]))' "$label")
+
+  logmsg "starting $ROOT_SESSION — label: $label sid: ${sid:-fresh}"
+  if [[ -n "$sid" ]]; then
+    tmux new-session -d -s "$ROOT_SESSION" -c "$ROOT_DIR" \
+      "$ROOT_CLAUDE_BIN -r $sid --remote-control -n $label_esc ''"
+  else
+    tmux new-session -d -s "$ROOT_SESSION" -c "$ROOT_DIR" \
+      "$ROOT_CLAUDE_BIN --remote-control -n $label_esc"
+  fi
+
+  sleep 0.5
+  if root_session_running; then
+    say "${c_green}✓${c_reset} started $ROOT_SESSION (\"$label\"${sid:+, sid ${sid:0:8}})"
+    logmsg "started $ROOT_SESSION"
+  else
+    die "$ROOT_SESSION did not come up — check 'tmux ls'"
+  fi
+}
+
+stop_root_tmux() {
+  if root_session_running; then
+    logmsg "stopping $ROOT_SESSION"
+    tmux kill-session -t "$ROOT_SESSION"
+    say "${c_green}✓${c_reset} stopped $ROOT_SESSION"
+  else
+    say "${c_yellow}~${c_reset} $ROOT_SESSION not running"
+  fi
+}
+
+cmd_root_status() {
+  local desired actual last last_stopped last_reconciled label
+  desired=$(root_state_get desired_state); [[ -z "$desired" ]] && desired="-"
+  if root_session_running; then actual="running"; else actual="stopped"; fi
+  last=$(root_state_get last_started); [[ -z "$last" ]] && last="-"
+  last_stopped=$(root_state_get last_stopped); [[ -z "$last_stopped" ]] && last_stopped="-"
+  last_reconciled=$(root_state_get last_reconciled); [[ -z "$last_reconciled" ]] && last_reconciled="-"
+  label=$(root_label)
+
+  cat <<EOF
+Root session
+  Tmux session:      $ROOT_SESSION
+  Working directory: $ROOT_DIR
+  Session label:     $label
+  Desired state:     $desired   (cron-reconcile resumes on crash if "running")
+  Actual state:      $actual
+  Last started:      $last
+  Last stopped:      $last_stopped
+  Last reconciled:   $last_reconciled
+EOF
+}
+
+cmd_root_start() {
+  root_state_update desired_state=running last_started="$(ts)"
+  start_root_tmux ""
+}
+
+cmd_root_resume() {
+  local sid=${1:-}
+  root_state_update desired_state=running last_started="$(ts)"
+  if [[ -n "$sid" ]]; then
+    start_root_tmux "$sid"
+  else
+    local latest; latest=$(root_latest_session_id 2>/dev/null || true)
+    if [[ -z "$latest" ]]; then
+      say "${c_yellow}!${c_reset} no prior root session found — starting fresh"
+      start_root_tmux ""
+    else
+      start_root_tmux "$latest"
+    fi
+  fi
+}
+
+cmd_root_stop() {
+  root_state_update desired_state=stopped last_stopped="$(ts)"
+  stop_root_tmux
+}
+
+cmd_root_restart() {
+  cmd_root_stop
+  cmd_root_start
+}
+
+cmd_root_rename() {
+  local label=${1:-}
+  [[ -n "$label" ]] || die "usage: claude-remote root rename <label>"
+  root_state_update label="$label"
+  say "${c_green}✓${c_reset} root session label set"
+  say "Restart root to apply: claude-remote root restart"
+}
+
+cmd_root_sessions() {
+  local json count
+  json=$(list_root_sessions_json)
+  count=$(python3 -c 'import json,sys; print(len(json.loads(sys.argv[1])))' "$json")
+
+  if [[ "$count" -eq 0 ]]; then
+    say "${c_yellow}No prior root sessions.${c_reset}"
+    say "Start a fresh one: claude-remote root start"
+    return 0
+  fi
+
+  say "Root sessions (most recent first):"
+  echo
+  printf '%-4s %-10s %-16s %-6s %s\n' "#" "ID" "WHEN" "MSGS" "FIRST USER MESSAGE"
+  # Pass JSON via argv (heredoc redirect overrides any pipe — sys.stdin would
+  # be empty if we used `printf | python3 - <<'PY'`).
+  python3 - "$json" <<'PY'
+import json, sys
+for i, s in enumerate(json.loads(sys.argv[1]), 1):
+    print(f"{i:<4} {s['sid'][:8]:<10} {s['mtime_h']:<16} {s['msgs']:<6} {s['preview']}")
+PY
+
+  if [[ -t 0 && -t 1 ]]; then
+    echo
+    local choice
+    read -r -p "Pick a session number to resume (Enter to cancel): " choice || return 0
+    [[ -z "$choice" ]] && { say "(cancelled)"; return 0; }
+    [[ "$choice" =~ ^[0-9]+$ ]] || die "invalid selection: $choice"
+    (( choice >= 1 && choice <= count )) || die "out of range: $choice (have $count)"
+
+    local chosen_sid
+    chosen_sid=$(python3 -c "import json, sys; print(json.loads(sys.argv[1])[$((choice-1))]['sid'])" "$json")
+    echo
+    cmd_root_resume "$chosen_sid"
+  else
+    echo
+    say "To resume a specific session: claude-remote root resume <id>"
+  fi
+}
+
+cmd_root() {
+  ensure_state
+  local sub=${1:-status}; shift || true
+  case "$sub" in
+    status)    cmd_root_status "$@" ;;
+    start)     cmd_root_start "$@" ;;
+    resume)    cmd_root_resume "$@" ;;
+    stop)      cmd_root_stop "$@" ;;
+    restart)   cmd_root_restart "$@" ;;
+    sessions)  cmd_root_sessions "$@" ;;
+    rename)    cmd_root_rename "$@" ;;
+    -h|--help|help)
+      cat <<EOF
+Usage: claude-remote root <subcommand> [args]
+
+Subcommands:
+  status                Show current root session state (running, desired, label)
+  start                 Mark desired=running and start tmux (fresh session)
+  resume [sid]          Mark desired=running and resume (latest or specific sid)
+  stop                  Mark desired=stopped and kill tmux
+  restart               Stop then start (fresh)
+  sessions              List prior root Claude sessions; interactive picker if TTY
+  rename <label>        Set the Remote Control session label (stored in state.json)
+
+Persistence: by default the root session is NOT tracked — running 'root start'
+or 'root resume' enrolls it (sets state.root.desired_state=running) so the
+cron reconciler will bring it back if it crashes. 'root stop' disenrolls it.
+EOF
+      ;;
+    *) die "unknown root subcommand: $sub (try 'claude-remote root --help')" ;;
+  esac
 }
 
 cmd_install() {
@@ -592,6 +946,7 @@ case "${1:-list}" in
   rename)      shift; cmd_rename "$@" ;;
   reconcile)   shift || true; cmd_reconcile "$@" ;;
   install)     shift || true; cmd_install "$@" ;;
+  root)        shift || true; cmd_root "$@" ;;
   -h|--help|help)
     cat <<EOF
 Usage: claude-remote <command> [args]
@@ -614,6 +969,8 @@ Commands:
                                 down, bring it back via 'resume' (intended for
                                 cron, every few minutes)
   install                       Symlink the CLI and slash commands; create state dir
+  root <subcommand>             Manage the root (operator) session — opt-in
+                                persistence. See 'claude-remote root --help'.
 EOF
     ;;
   *) die "unknown command: $1 (try --help)" ;;
