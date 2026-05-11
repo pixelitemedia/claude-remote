@@ -19,6 +19,10 @@ Phone → Remote Control → Relay VPS (Claude Code) → SSH → Target servers
 | [`skills/server-sysadmin/scripts/claude.sh`](skills/server-sysadmin/scripts/claude.sh) | tmux session launcher (`claude.sh [project] [stop\|status]`) |
 | [`skills/server-sysadmin/references/server-ssh/`](skills/server-sysadmin/references/server-ssh/) | Operator skill bundled into each project workspace |
 | [`skills/server-sysadmin/references/project-CLAUDE.md.template`](skills/server-sysadmin/references/project-CLAUDE.md.template) | Stub copied into new projects |
+| [`skills/project-sessions/`](skills/project-sessions/) | Stateful session manager for relay projects (start/stop/reconcile) |
+| [`skills/project-sessions/scripts/claude-relay`](skills/project-sessions/scripts/claude-relay) | CLI: `list`, `status`, `start`, `stop`, `restart`, `reconcile`, `install` |
+| [`skills/project-sessions/commands/`](skills/project-sessions/commands/) | Slash commands installed for root Claude (`/list-projects`, `/start-project`, …) |
+| [`skills/project-sessions/references/cron.example`](skills/project-sessions/references/cron.example) | Cron snippet for the 5-min reconcile loop (+ optional Haiku check) |
 
 ## Getting started
 
@@ -28,7 +32,9 @@ On a fresh relay droplet:
 2. Tell Claude **"set up sysadmin"** → runs `bootstrap.sh`: hardens the server (UFW, fail2ban, unattended-upgrades, key-only SSH, 1GB swap), creates the `claude` user, installs `claude.sh`, pre-authorizes workspace trust.
 3. Tell Claude **"provision a new project called `<name>`, host `<hostname>`, user `<user>`"** → creates `/home/claude/<name>/` with its own keypair, `config.json`, `CLAUDE.md`, and a copy of `server-ssh`.
 4. Paste the printed `authorized_keys` line on the target server.
-5. `claude.sh <project>` → connect from phone via Remote Control.
+5. Install the session manager: `bash skills/project-sessions/scripts/claude-relay install` (one-time per relay; sets up `/usr/local/bin/claude-relay`, slash commands, state dir).
+6. `claude-relay start <project>` → starts the tmux session and records desired-state. Add a cron entry from [`cron.example`](skills/project-sessions/references/cron.example) for auto-restart on crash.
+7. Connect from phone via Remote Control.
 
 ## Architecture
 

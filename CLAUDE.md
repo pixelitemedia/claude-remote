@@ -30,6 +30,7 @@ Phone → Remote Control → Relay VPS (Claude Code) → SSH → Target servers
 
 - **`server-sysadmin`** — installer/provisioner. Root Claude only. Trigger: "set up sysadmin" or "run initial setup". Contains `scripts/bootstrap.sh`, `scripts/claude.sh`, and a bundled copy of `server-ssh` to install into each project.
 - **`server-ssh`** — operator skill installed into every project. Reads `config.json`, builds SSH commands using the local `key`, covers health checks / systemctl / journalctl / Docker / files / packages / processes. Hard boundary: only SSHes to hosts in `config.json`.
+- **`project-sessions`** — root Claude only. Stateful session manager. Ships `claude-relay` (CLI) and slash commands (`/list-projects`, `/start-project`, `/stop-project`, `/reconcile-projects`, `/project-status`). Records desired state in `/var/lib/claude-relay/state.json`; a cron reconciler brings back anything that crashed. Starting a project resumes its latest Claude session via `claude --continue remote-control`. Install with `bash skills/project-sessions/scripts/claude-relay install`.
 
 ## claude.sh — session launcher
 

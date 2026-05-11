@@ -1,0 +1,32 @@
+# /etc/cron.d/claude-relay   (or root's crontab)
+#
+# Reconcile every 5 minutes — bring back up any desired=running project that crashed.
+# This is pure shell, no LLM cost. Output is rate-limited to the log file.
+*/5 * * * * root /usr/local/bin/claude-relay reconcile
+
+# Daily log rotation hint — keep the log from growing unbounded.
+# Better: drop a /etc/logrotate.d/claude-relay file. Quick-and-dirty inline:
+# 0 4 * * * root [ $(stat -c%s /var/log/claude-relay.log 2>/dev/null || echo 0) -gt 1048576 ] && \
+#   mv /var/log/claude-relay.log /var/log/claude-relay.log.1 && touch /var/log/claude-relay.log
+
+
+# -------------------------------------------------------------------------
+# OPTIONAL — Claude-driven health check (Haiku, cheap).
+# -------------------------------------------------------------------------
+# Don't enable without explicit user buy-in. Costs money per run.
+# Requires the project-sessions skill installed under /root/.claude/skills/
+# (or symlinked from this repo) so Claude can find it.
+#
+# Hourly: ask Haiku to read recent log entries, decide if anything looks like
+# a crash loop (e.g. same project reconciled 3+ times in an hour), and write a
+# one-line summary to a separate log.
+#
+# 0 * * * * root /usr/local/bin/claude --model claude-haiku-4-5 --print \
+#   "Use the project-sessions skill. Run /reconcile-projects, then tail the last 50 lines of /var/log/claude-relay.log. If any project has been reconciled more than 3 times in the past hour, flag it as a possible crash loop. Otherwise just say 'all healthy'." \
+#   >> /var/log/claude-relay-haiku.log 2>&1
+#
+# Notes:
+# - Headless `claude --print` needs the relay's Claude Code installation to be
+#   authenticated as root. Test by running the command interactively first.
+# - The --model flag forces Haiku for cost. Remove it to use the default model.
+# - Output goes to a separate log so it doesn't pollute the cheap reconcile log.
