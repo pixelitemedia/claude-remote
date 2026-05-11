@@ -252,21 +252,30 @@ if [[ ! -f /root/CLAUDE.md ]]; then
   cat > /root/CLAUDE.md <<'EOF'
 # Root Claude — relay VPS
 
-You are root Claude on the relay. Your job is to manage the relay itself and
-provision new project workspaces under /home/claude/<project>/.
+You are root Claude on the relay. Your job is to manage the relay itself,
+provision new project workspaces under /home/claude/<project>/, and manage
+the lifecycle of project Claude sessions.
+
+## Skills you have
+
+- `server-sysadmin-bootstrap` — one-time relay setup (already run)
+- `server-sysadmin` — provision a new project for a target server
+- `project-sessions` — manage running project sessions (start/stop/reconcile)
 
 ## Common tasks
 
-- Bootstrap / re-run setup: `bash <skill>/scripts/bootstrap.sh`
-- List sessions: `claude.sh list`
-- Start/stop project sessions: `claude.sh <project>` / `claude.sh <project> stop`
-- Provision a new project: invoke the `server-sysadmin` skill's provisioning flow
+- List projects + state: `/list-projects` or `claude-relay list`
+- Start (resume latest session): `/start-project <name>` or `claude-relay start <name>`
+- Stop a project: `/stop-project <name>` or `claude-relay stop <name>`
+- Reconcile drift: `/reconcile-projects` or `claude-relay reconcile`
+- Provision a new project: invoke the `server-sysadmin` skill
+- Root tmux session: `claude.sh` (start/reattach), `claude.sh stop`
 
 ## Hard rules
 
-- Do NOT SSH into target servers from the root session — that's the project
+- Do NOT SSH into target servers from the root session — that is the project
   Claude's job, using its own per-project key.
-- Stop the root session when not actively provisioning: `claude.sh stop`.
+- Stop the root session when not actively provisioning or managing: `claude.sh stop`.
 EOF
   ok "/root/CLAUDE.md written"
 else
@@ -279,6 +288,45 @@ fi
 install -d -o "$CLAUDE_USER" -g "$CLAUDE_USER" -m 0750 "${CLAUDE_HOME}/.claude"
 if [[ ! -f "${CLAUDE_HOME}/.claude.json" ]]; then
   sudo -u "$CLAUDE_USER" bash -c 'echo "{}" > ~/.claude.json'
+fi
+
+#------------------------------------------------------------------------------
+# 13. Chain into project-sessions install (if the sibling skill is present)
+#------------------------------------------------------------------------------
+# Skill layout: skills/server-sysadmin-bootstrap/scripts/bootstrap.sh
+# Sibling:     skills/project-sessions/scripts/claude-relay
+SKILLS_DIR="$(dirname "$(dirname "$SCRIPT_DIR")")"
+RELAY_CLI="${SKILLS_DIR}/project-sessions/scripts/claude-relay"
+
+if [[ -x "$RELAY_CLI" ]]; then
+  log "Chaining into project-sessions install"
+  "$RELAY_CLI" install
+  ok "project-sessions installed"
+
+  # Offer to install the cron reconciler.
+  CRON_LINE='*/5 * * * * /usr/local/bin/claude-relay reconcile'
+  install_cron=0
+  if [[ $ASSUME_YES -eq 1 ]]; then
+    install_cron=1
+  elif [[ -t 0 ]]; then
+    read -r -p "Install cron reconciler ('${CRON_LINE}') for root? [y/N] " ans
+    [[ "$ans" =~ ^[Yy]$ ]] && install_cron=1
+  fi
+
+  if [[ $install_cron -eq 1 ]]; then
+    # Replace any existing claude-relay reconcile line, preserve the rest.
+    if (crontab -l 2>/dev/null | grep -v 'claude-relay reconcile'; echo "$CRON_LINE") | crontab -; then
+      ok "Cron reconciler installed for root"
+    else
+      warn "Failed to install cron entry — add manually:  ${CRON_LINE}"
+    fi
+  else
+    echo "Skipped cron install. To add later:"
+    echo "    (crontab -l 2>/dev/null | grep -v 'claude-relay reconcile'; echo '$CRON_LINE') | crontab -"
+  fi
+else
+  warn "project-sessions skill not found alongside this one — skipping claude-relay install"
+  echo "    Expected at: $RELAY_CLI"
 fi
 
 echo

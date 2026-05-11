@@ -1,91 +1,73 @@
 # CLAUDE.md — claude.remote
 
-Local working directory for the **Remote Sysadmin via Claude Code Relay** project. The actual runtime lives on a DigitalOcean droplet (the "relay VPS"); this directory holds the source for skills, scripts, and notes that get deployed there.
+Source for the **Remote Sysadmin via Claude Code Relay** project. The runtime lives on a DigitalOcean droplet (the "relay VPS"); this directory holds the skills, scripts, and notes that get deployed to it. User-facing documentation lives in [README.md](README.md) — don't duplicate it here.
 
-## Purpose
+## What you're working on
 
-A relay VPS that runs Claude Code CLI with Remote Control enabled, so the phone can drive Claude, and Claude SSHes from the relay into target servers (Rai/OpenClaw and others). Cloud sessions block outbound SSH — the relay exists to work around that.
+A relay VPS runs Claude Code with Remote Control. The phone drives Claude on the relay; Claude SSHes from the relay into target servers (cloud sessions block outbound SSH — the relay exists to work around that).
 
 ```
 Phone → Remote Control → Relay VPS (Claude Code) → SSH → Target servers
 ```
 
-## Architecture
+## Architecture you should know
 
-**Relay VPS** runs two kinds of Claude sessions:
+Two kinds of Claude sessions live on the relay:
 
-- **Root Claude** — manages the relay itself, provisions new project workspaces. Stop when idle.
-- **Project Claude** — runs as `claude` user from `/home/claude/<project>/`. Each project owns a keypair and a `config.json` listing the hosts it may SSH into. Always-on.
+- **Root Claude** — manages the relay, provisions projects, manages session lifecycle. Stopped when idle.
+- **Project Claude** — runs as the `claude` user from `/home/claude/<project>/`. Each project owns its keypair and a `config.json` listing the hosts it may SSH into. Always-on.
 
-**Per-project layout** (`/home/claude/<project>/`):
+Per-project layout on the relay:
 
-| File | Purpose |
-|---|---|
-| `key` / `key.pub` | ed25519 SSH keypair, shared across all hosts in the project |
-| `config.json` | Hosts: name, aliases, hostname, user, default |
-| `CLAUDE.md` | Project guidelines + target-server knowledge |
-| `.claude/skills/server-ssh/SKILL.md` | Operator skill |
-
-## Skills
-
-- **`server-sysadmin`** — installer/provisioner. Root Claude only. Trigger: "set up sysadmin" or "run initial setup". Contains `scripts/bootstrap.sh`, `scripts/claude.sh`, and a bundled copy of `server-ssh` to install into each project.
-- **`server-ssh`** — operator skill installed into every project. Reads `config.json`, builds SSH commands using the local `key`, covers health checks / systemctl / journalctl / Docker / files / packages / processes. Hard boundary: only SSHes to hosts in `config.json`.
-- **`project-sessions`** — root Claude only. Stateful session manager. Ships `claude-relay` (CLI) and slash commands (`/list-projects`, `/start-project`, `/stop-project`, `/reconcile-projects`, `/project-status`). Records desired state in `/var/lib/claude-relay/state.json`; a cron reconciler brings back anything that crashed. Starting a project resumes its latest Claude session via `claude --continue remote-control`. Install with `bash skills/project-sessions/scripts/claude-relay install`.
-
-## claude.sh — session launcher
-
-Installed at `/usr/local/bin/claude.sh` on the relay. Run as root.
-
-```bash
-claude.sh                   # Root session (start or reattach)
-claude.sh stop              # Stop root session
-claude.sh status            # Check root session
-claude.sh <project>         # Project session (start or reattach)
-claude.sh <project> stop    # Stop project session
-claude.sh <project> status  # Project session status
-claude.sh list              # All sessions + available projects
+```
+/home/claude/<project>/
+├── key, key.pub           # ed25519, shared across hosts in this project
+├── config.json            # name, aliases, hostname, user, default
+├── CLAUDE.md              # project + target-server knowledge
+└── .claude/skills/server-ssh/SKILL.md
 ```
 
-## Key gotchas (do not relearn these)
+Persisted relay state (managed by `claude-relay`):
 
-1. **SSH must use** `-T -o BatchMode=yes -o StrictHostKeyChecking=no -o ConnectTimeout=10` — otherwise hangs in non-interactive sessions.
-2. **Workspace trust must be pre-authorized** — set `hasTrustDialogAccepted: true` in `~/.claude.json` under `projects.<path>` so Claude doesn't sit at the trust dialog.
-3. **`--dangerously-skip-permissions` is blocked in Remote Control sessions by design** — only works in direct sessions. For root, set `allowBypassPermissions: true` in `/root/.claude/settings.json` instead.
-4. **Cloud sessions block outbound SSH/TCP** — the entire reason the relay exists.
-5. **Use tmux, not screen** — better reattach.
-6. **`claude remote-control`** is a positional arg, not `--remote-control`.
-7. **User-level systemd services** (e.g. OpenClaw on Rai) need `--user` on both `systemctl` and `journalctl`.
+- `/var/lib/claude-relay/state.json` — desired state per project
+- `/var/log/claude-relay.log` — reconcile + start/stop log
 
-## Provisioning a new project
+## Skills in this repo
 
-1. Upload `server-sysadmin.skill` to root Claude on the relay.
-2. "Set up sysadmin" → runs bootstrap: creates `claude` user with passwordless sudo, hardens (UFW port 22 only, fail2ban, auto-updates, 1GB swap, key-only SSH), installs `claude.sh`, pre-authorizes workspace trust, copies root's `authorized_keys` to the `claude` user, writes `/root/CLAUDE.md`.
-3. "Provision a new project called `<name>`, host `<hostname>`, user `<user>`, reference name `<name>`" → creates the project dir, keypair, `config.json`, `CLAUDE.md`, installs `server-ssh`, pre-trusts the workspace, prints an `authorized_keys` line, tests the connection, starts tmux.
-4. Paste the `authorized_keys` line on the target server.
-5. `claude.sh <project>` → connect from phone via Remote Control.
+- **`server-sysadmin-bootstrap`** — root Claude only. One-time per relay. Triggers: "set up sysadmin", "bootstrap this server". Hardens the VPS, creates the `claude` user, installs `claude.sh` and `claude-relay`, chains into `project-sessions install`, optionally adds the cron reconciler.
+- **`server-sysadmin`** — root Claude only. Once per target server. Triggers: "provision a new project", "add a server". Creates `/home/claude/<project>/` with keypair, `config.json`, project `CLAUDE.md`, and a bundled copy of `server-ssh`.
+- **`project-sessions`** — root Claude only. Used continuously. Ships `claude-relay` and slash commands (`/list-projects`, `/start-project`, `/stop-project`, `/reconcile-projects`, `/project-status`). State + reconciliation live here.
+- **`server-ssh`** — bundled with `server-sysadmin`, installed into each provisioned project. The operator skill for SSHing into target servers. Reads `config.json`, uses the project's local `key`, covers health checks / systemctl / journalctl / Docker / files / packages. Hard boundary: only SSHes to hosts in `config.json`.
 
-## Per-project CLAUDE.md should include
+## Behavioral constraints (gotchas)
 
-Each project's `CLAUDE.md` (on the relay) gets target-specific knowledge:
+These are baked into the scripts but matter when you write or modify them:
 
-- CLI commands and common operations
-- Service names (systemd units, Docker containers)
-- Config + log file locations
-- Runbooks and known issues
+1. **SSH commands must use** `-T -o BatchMode=yes -o StrictHostKeyChecking=no -o ConnectTimeout=10` or they hang in non-interactive sessions.
+2. **Workspace trust must be pre-set** (`hasTrustDialogAccepted: true` in `~/.claude.json`) or Claude sits at the trust dialog.
+3. **`--dangerously-skip-permissions` is blocked in Remote Control sessions** by design. For root, use `allowBypassPermissions: true` in `/root/.claude/settings.json` instead.
+4. **`claude remote-control`** is a positional subcommand, not `--remote-control`.
+5. **Use tmux**, not screen.
+6. **User-level systemd services** need `--user` on both `systemctl` and `journalctl`.
+7. **Starting a project should resume**, not reset: launch with `claude --continue remote-control`.
 
-For **OpenClaw / Rai**: see `github.com/pixelitemedia/openclaw-docs-skill` — and use the user's global `openclaw-docs` skill (grep `~/.claude/skills/openclaw-docs/versions/openclaw-docs.latest.md`) before answering factual OpenClaw questions.
+## Hard rules
 
-## Open issues
-
-| Issue | Status |
-|---|---|
-| Remote Control drops connections | Known. Looked at Agent SDK as alternative; staying on current approach. |
-| `claude.sh` sometimes missing after bootstrap | Locate manually: `find / -name claude.sh -path '*/server-sysadmin/*' 2>/dev/null` then `cp` into `/usr/local/bin/` and `chmod +x`. |
-| VPS sizing | $4 droplet tight, $6/mo (1GB) comfortable, $12/mo (2GB) for parallel projects. |
+- Never copy `claude.sh` or `claude-relay` into `/usr/local/bin/` — always symlink. Edits in the repo must propagate.
+- Never run `bootstrap.sh` without verifying `/root/.ssh/authorized_keys` has working keys. The script enforces this, but the SKILL flow asks Claude to verify with the user first.
+- Never overwrite an existing project's keypair without explicit confirmation.
+- Never paste a project's private `key` anywhere. Only `key.pub` goes on target servers.
+- Cron reconciler only auto-restarts projects with `desired_state=running`. It must never auto-stop anything.
 
 ## Preferences (inherited from parent CLAUDE.md)
 
 - Concise and practical
 - Prefer editing existing files
-- No unnecessary comments/docstrings/boilerplate
+- No unnecessary comments / docstrings / boilerplate
 - Ask before large or irreversible changes
+
+## When in doubt
+
+- **User-facing docs** (how to install, day-to-day commands, troubleshooting): put it in [README.md](README.md), not here.
+- **Skill-specific behavior** (when to trigger, step-by-step flows): put it in the skill's `SKILL.md`, not here.
+- **This file**: project-wide architecture, skill inventory, behavioral constraints, hard rules.

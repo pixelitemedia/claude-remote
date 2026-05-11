@@ -1,85 +1,11 @@
 ---
 name: server-sysadmin
-description: Installer and provisioner for the Claude Code relay VPS. Use this skill on the root Claude session of a fresh relay droplet to (a) harden the server and install the claude.sh tmux launcher ("set up sysadmin" / "run initial setup"), and (b) provision new project workspaces under /home/claude/<project>/ that each get their own SSH keypair, config.json listing target hosts, and a bundled server-ssh operator skill. Do NOT use this skill inside a project Claude session — those use server-ssh, not server-sysadmin.
+description: Provisions a new project workspace on the relay VPS for an additional target server. Use this skill on the root Claude session when the user wants to "provision a new project", "add a server", "set up <name> as a target", or otherwise extend the relay to manage one more remote host. Creates /home/claude/<project>/ with its own ed25519 keypair, a config.json listing target hosts, a project-specific CLAUDE.md, and a bundled copy of the server-ssh operator skill. Do NOT use for the one-time relay bootstrap — that's server-sysadmin-bootstrap. Do NOT use inside a project Claude session — those use server-ssh, not server-sysadmin.
 ---
 
 # server-sysadmin
 
-You are root Claude on a relay VPS. This skill installs the relay tooling and provisions per-target project workspaces.
-
-## When to use which flow
-
-| User says | Run |
-|---|---|
-| "set up sysadmin", "run initial setup", "bootstrap this server" | **Bootstrap flow** |
-| "provision a new project", "add a new server", "create project X for host Y" | **Provisioning flow** |
-
-If unsure, ask. Bootstrap is one-time per VPS; provisioning is per target server.
-
----
-
-## Bootstrap flow
-
-Run **once** on a fresh root login. Idempotent — safe to re-run.
-
-### Step 0 — verify SSH key access BEFORE doing anything
-
-This bootstrap disables SSH password auth. If root has no working SSH key the user gets locked out the moment sshd reloads. **You must verify keys before running the script.**
-
-1. Inspect `/root/.ssh/authorized_keys`:
-   ```bash
-   ls -la /root/.ssh/
-   ssh-keygen -l -f /root/.ssh/authorized_keys 2>/dev/null || echo "MISSING OR INVALID"
-   ```
-2. Report back to the user: how many keys, fingerprints, whether they parse as valid SSH public keys.
-3. Ask the user to confirm: **"Can you SSH in as root using one of these keys right now? Test from a second terminal."** Wait for confirmation.
-4. **If `authorized_keys` is missing, empty, or invalid, do NOT run bootstrap.** Offer to help set one up:
-   ```bash
-   mkdir -p /root/.ssh && chmod 700 /root/.ssh
-   # User pastes their ssh-ed25519 / ssh-rsa public key:
-   nano /root/.ssh/authorized_keys
-   chmod 600 /root/.ssh/authorized_keys
-   ```
-   Then re-test from a second terminal before proceeding.
-
-The script itself enforces this with a pre-flight check and refuses to run if `authorized_keys` is missing, empty, or unparseable. It also prompts interactively unless invoked with `-y`.
-
-### Step 1 — run bootstrap
-
-Once Step 0 is satisfied:
-
-```bash
-bash scripts/bootstrap.sh        # interactive — prompts to confirm lockout risk
-# or, if the user has already confirmed in chat:
-bash scripts/bootstrap.sh -y     # skip prompt
-```
-
-It will:
-- Re-check `authorized_keys` (pre-flight, hard fail)
-- Create the `claude` user with passwordless sudo
-- Mirror root's `authorized_keys` to `/home/claude/.ssh/`
-- Install UFW (port 22 only), fail2ban, unattended-upgrades
-- Create a 1GB swap file if none exists
-- Disable SSH password auth + set `PermitRootLogin prohibit-password`
-- **Symlink** `scripts/claude.sh` to `/usr/local/bin/claude.sh` (so edits in the skill repo propagate without reinstall)
-- Pre-authorize workspace trust in `/root/.claude.json` for `/root`
-- Set `allowBypassPermissions: true` in `/root/.claude/settings.json`
-- Write a starter `/root/CLAUDE.md`
-
-### Step 2 — hand off
-
-After it finishes, tell the user:
-- "Bootstrap complete. Run `claude.sh list` to see sessions."
-- "Next: provision a project — give me a name, hostname, and user for the target server."
-
-If `claude.sh` is not on PATH afterwards, fall back to a symlink (not a copy — we want edits in the skill to propagate):
-```bash
-find / -name claude.sh -path '*/server-sysadmin/*' 2>/dev/null
-chmod +x <found_path>
-ln -sfn <found_path> /usr/local/bin/claude.sh
-```
-
----
+You are root Claude on a relay VPS. This skill provisions per-target project workspaces. The relay itself must already be bootstrapped via `server-sysadmin-bootstrap` before you run this — verify by checking that `/usr/local/bin/claude.sh` exists and the `claude` user is present.
 
 ## Provisioning flow
 
@@ -92,7 +18,7 @@ Inputs you need from the user (ask for any missing):
 
 Steps:
 
-1. **Create project dir** at `/home/claude/<project>/`, owned by `claude:claude`, mode `0750`.
+1. **Create project dir** at `/home/claude/<project>/`, owned by `claude:claude`, mode `0750`. If the directory already exists, stop and ask the user whether to reuse or pick a different name — never overwrite an existing keypair.
 2. **Generate an ed25519 keypair** as the `claude` user:
    ```bash
    sudo -u claude ssh-keygen -t ed25519 -N '' -C "claude@relay:<project>" -f /home/claude/<project>/key
@@ -123,29 +49,25 @@ Steps:
 
        <contents of /home/claude/<project>/key.pub>
 
-   Then run:
-       claude.sh <project>
+   Then start the session:
+       claude-relay start <project>
    ```
-8. **Test SSH** (optional, can ask the user first):
+8. **Test SSH** (optional, ask the user first):
    ```bash
    sudo -u claude ssh -T -o BatchMode=yes -o StrictHostKeyChecking=no -o ConnectTimeout=10 \
      -i /home/claude/<project>/key <user>@<hostname> 'echo ok'
    ```
-   If it fails with permission denied, that's expected — the user still needs to paste the key. If it fails with connection refused / timeout, surface that.
+   If it fails with permission denied, that is expected — the user still needs to paste the key. If it fails with connection refused / timeout, surface that.
 
----
-
-## Key gotchas — read before doing anything
+## Key gotchas
 
 1. **SSH must use** `-T -o BatchMode=yes -o StrictHostKeyChecking=no -o ConnectTimeout=10` in scripts. Without these it hangs.
-2. **Pre-authorize workspace trust** — Claude will sit at the trust dialog otherwise. Set `hasTrustDialogAccepted: true` in `~/.claude.json`.
-3. **`--dangerously-skip-permissions` is blocked in Remote Control sessions** — for root, use `allowBypassPermissions: true` in `/root/.claude/settings.json` instead.
-4. **`claude remote-control`** is a positional arg, not `--remote-control`.
-5. **Use tmux**, not screen.
-6. **User-level systemd services** (OpenClaw on Rai etc.) need `--user` on both `systemctl` and `journalctl`.
+2. **Pre-authorize workspace trust** — Claude sits at the trust dialog otherwise. Set `hasTrustDialogAccepted: true` in `~/.claude.json`.
+3. **`claude remote-control`** is a positional subcommand, not a `--remote-control` flag.
+4. **User-level systemd services** (e.g. OpenClaw on Rai) need `--user` on both `systemctl` and `journalctl`. The bundled `server-ssh` skill knows this — pass it along in the project's `CLAUDE.md` if relevant.
 
 ## Hard rules
 
-- Never run `bootstrap.sh` on a server that already has production workloads without warning the user — it modifies SSH config and firewall.
 - Never overwrite an existing project's `key` / `key.pub` without explicit confirmation. If the project dir exists, ask before proceeding.
 - Never paste a project's private `key` anywhere. Only `key.pub` goes on target servers.
+- Never SSH into the target server from this skill — that is the project Claude's job once it's running. Step 8 is a one-shot connectivity test, nothing more.

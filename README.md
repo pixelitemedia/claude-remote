@@ -8,40 +8,12 @@ A small DigitalOcean droplet runs Claude Code CLI with Remote Control enabled. T
 Phone → Remote Control → Relay VPS (Claude Code) → SSH → Target servers
 ```
 
-## What's in here
-
-| Path | Purpose |
-|---|---|
-| [`CLAUDE.md`](CLAUDE.md) | Project-wide context for Claude Code |
-| [`skills/`](skills/) | Skills used by the relay |
-| [`skills/server-sysadmin/`](skills/server-sysadmin/) | Installer/provisioner skill, run by root Claude on the relay |
-| [`skills/server-sysadmin/scripts/bootstrap.sh`](skills/server-sysadmin/scripts/bootstrap.sh) | One-time relay VPS hardening + install |
-| [`skills/server-sysadmin/scripts/claude.sh`](skills/server-sysadmin/scripts/claude.sh) | tmux session launcher (`claude.sh [project] [stop\|status]`) |
-| [`skills/server-sysadmin/references/server-ssh/`](skills/server-sysadmin/references/server-ssh/) | Operator skill bundled into each project workspace |
-| [`skills/server-sysadmin/references/project-CLAUDE.md.template`](skills/server-sysadmin/references/project-CLAUDE.md.template) | Stub copied into new projects |
-| [`skills/project-sessions/`](skills/project-sessions/) | Stateful session manager for relay projects (start/stop/reconcile) |
-| [`skills/project-sessions/scripts/claude-relay`](skills/project-sessions/scripts/claude-relay) | CLI: `list`, `status`, `start`, `stop`, `restart`, `reconcile`, `install` |
-| [`skills/project-sessions/commands/`](skills/project-sessions/commands/) | Slash commands installed for root Claude (`/list-projects`, `/start-project`, …) |
-| [`skills/project-sessions/references/cron.example`](skills/project-sessions/references/cron.example) | Cron snippet for the 5-min reconcile loop (+ optional Haiku check) |
-
-## Getting started
-
-On a fresh relay droplet:
-
-1. Get the `server-sysadmin` skill onto root Claude (clone this repo or upload as a skill bundle).
-2. Tell Claude **"set up sysadmin"** → runs `bootstrap.sh`: hardens the server (UFW, fail2ban, unattended-upgrades, key-only SSH, 1GB swap), creates the `claude` user, installs `claude.sh`, pre-authorizes workspace trust.
-3. Tell Claude **"provision a new project called `<name>`, host `<hostname>`, user `<user>`"** → creates `/home/claude/<name>/` with its own keypair, `config.json`, `CLAUDE.md`, and a copy of `server-ssh`.
-4. Paste the printed `authorized_keys` line on the target server.
-5. Install the session manager: `bash skills/project-sessions/scripts/claude-relay install` (one-time per relay; sets up `/usr/local/bin/claude-relay`, slash commands, state dir).
-6. `claude-relay start <project>` → starts the tmux session and records desired-state. Add a cron entry from [`cron.example`](skills/project-sessions/references/cron.example) for auto-restart on crash.
-7. Connect from phone via Remote Control.
-
 ## Architecture
 
 **Two kinds of Claude sessions on the relay:**
 
-- **Root Claude** — manages the relay, provisions projects. Stop when idle.
-- **Project Claude** — runs as `claude` user from `/home/claude/<project>/`. Each project has its own SSH key and a `config.json` listing hosts it may connect to. Always-on.
+- **Root Claude** — manages the relay, provisions new projects, manages project session lifecycle. Stop when idle.
+- **Project Claude** — runs as the `claude` user from `/home/claude/<project>/`. Each project has its own SSH key and a `config.json` listing hosts it may connect to. Always-on.
 
 **Per-project layout:**
 
@@ -53,12 +25,139 @@ On a fresh relay droplet:
 └── .claude/skills/server-ssh/SKILL.md
 ```
 
+## Repository layout
+
+| Path | Purpose |
+|---|---|
+| [`CLAUDE.md`](CLAUDE.md) | Project-wide context for Claude Code |
+| [`skills/server-sysadmin-bootstrap/`](skills/server-sysadmin-bootstrap/) | One-time relay VPS setup |
+| [`skills/server-sysadmin-bootstrap/scripts/bootstrap.sh`](skills/server-sysadmin-bootstrap/scripts/bootstrap.sh) | Hardens the server and chains into other installs |
+| [`skills/server-sysadmin-bootstrap/scripts/claude.sh`](skills/server-sysadmin-bootstrap/scripts/claude.sh) | Root + project tmux session launcher |
+| [`skills/server-sysadmin/`](skills/server-sysadmin/) | Provisions per-target project workspaces |
+| [`skills/server-sysadmin/references/server-ssh/`](skills/server-sysadmin/references/server-ssh/) | Operator skill bundled into each project workspace |
+| [`skills/server-sysadmin/references/project-CLAUDE.md.template`](skills/server-sysadmin/references/project-CLAUDE.md.template) | Stub copied into new projects |
+| [`skills/project-sessions/`](skills/project-sessions/) | Stateful session manager (start/stop/reconcile) |
+| [`skills/project-sessions/scripts/claude-relay`](skills/project-sessions/scripts/claude-relay) | CLI: `list`, `status`, `start`, `stop`, `restart`, `reconcile`, `install` |
+| [`skills/project-sessions/commands/`](skills/project-sessions/commands/) | Slash commands (`/list-projects`, `/start-project`, …) |
+| [`skills/project-sessions/references/cron.example`](skills/project-sessions/references/cron.example) | Reconcile cron snippet (+ optional Haiku check) |
+
+## Skills
+
+Three skills, used in order:
+
+1. **`server-sysadmin-bootstrap`** — one-time per relay. Hardens the server, installs `claude.sh` and `claude-relay`, optionally adds the cron reconciler.
+2. **`server-sysadmin`** — once per target server. Creates `/home/claude/<project>/` with its own keypair, `config.json`, and bundled `server-ssh` operator skill.
+3. **`project-sessions`** — used continuously. Manages running project Claude sessions with persisted desired state.
+
+## Getting started
+
+On a fresh relay droplet, logged in as root:
+
+```bash
+git clone https://github.com/pixelitemedia/claude-remote.git ~/claude-remote
+cd ~/claude-remote
+```
+
+Then start Claude Code from `~/claude-remote` (so the three skills under `skills/` are picked up — symlink them into `/root/.claude/skills/` if needed) and follow the conversational flow below.
+
+### 1. Bootstrap the relay (once)
+
+```
+You: set up sysadmin
+```
+
+Claude will:
+1. Inspect `/root/.ssh/authorized_keys`, report fingerprints, and ask you to confirm you can SSH in with one of them from a second terminal.
+2. Run `bash skills/server-sysadmin-bootstrap/scripts/bootstrap.sh` after you confirm.
+3. The script hardens the server (UFW, fail2ban, unattended-upgrades, key-only SSH, 1GB swap), creates the `claude` user, installs `claude.sh` and `claude-relay`, and prompts to install the 5-minute reconcile cron.
+
+Re-running is safe — the script is idempotent.
+
+### 2. Provision a project (once per target server)
+
+```
+You: provision a new project called rai, host 1.2.3.4, user marcus
+```
+
+Claude will create `/home/claude/rai/` with its own ed25519 keypair, `config.json`, a stub `CLAUDE.md`, and a copy of the `server-ssh` operator skill. It will print the public key to paste into `/home/<user>/.ssh/authorized_keys` on the target server.
+
+### 3. Start the project session
+
+```
+You: /start-project rai
+```
+
+Or equivalently `claude-relay start rai`. This:
+- Marks `desired_state=running` in `/var/lib/claude-relay/state.json`
+- Launches `claude --continue remote-control` inside tmux, resuming the latest session (not starting fresh)
+- The cron reconciler will bring it back if it ever crashes
+
+### 4. Connect from your phone
+
+Open Remote Control on the phone and pick the session. You're now driving the project Claude, which can SSH into the target server using its own per-project key.
+
+## Day-to-day commands
+
+### `claude.sh` — direct tmux launcher (root)
+
+Installed at `/usr/local/bin/claude.sh` by bootstrap.
+
+```bash
+claude.sh                   # Root session (start or reattach)
+claude.sh stop              # Stop root session
+claude.sh status            # Root session status
+claude.sh <project>         # Project session (start or reattach — delegates to claude-relay)
+claude.sh <project> stop    # Stop project session
+claude.sh <project> status  # Project session status
+claude.sh list              # All sessions + available projects
+```
+
+Stop the root session when not actively managing the relay (`claude.sh stop`). Project sessions stay always-on.
+
+### `claude-relay` — stateful session manager (root)
+
+Installed at `/usr/local/bin/claude-relay` by bootstrap (via the `project-sessions` skill).
+
+```bash
+claude-relay list                List all projects + desired vs actual state
+claude-relay status [project]    Detailed status (falls back to list)
+claude-relay start <project>     Mark desired=running and start tmux (resumes latest)
+claude-relay stop <project>      Mark desired=stopped and kill tmux
+claude-relay restart <project>   Stop then start
+claude-relay reconcile           Restart any desired=running project that's down
+claude-relay install             Re-install symlinks and slash commands (rarely needed)
+```
+
+State at `/var/lib/claude-relay/state.json`, log at `/var/log/claude-relay.log`.
+
+### Slash commands (root Claude REPL)
+
+Installed by bootstrap into `/root/.claude/commands/`:
+
+| Command | Action |
+|---|---|
+| `/list-projects` | `claude-relay list` |
+| `/project-status <name>` | `claude-relay status <name>` |
+| `/start-project <name>` | `claude-relay start <name>` |
+| `/stop-project <name>` | `claude-relay stop <name>` |
+| `/reconcile-projects` | `claude-relay reconcile` |
+
+### Cron
+
+Bootstrap offers to install:
+
+```
+*/5 * * * * /usr/local/bin/claude-relay reconcile
+```
+
+Pure shell, no LLM cost. See [`cron.example`](skills/project-sessions/references/cron.example) for an optional Haiku-driven hourly health check.
+
 ## Key gotchas
 
-These cost us time during the original build. Don't relearn them:
+These cost time during the original build. Don't relearn them:
 
-1. SSH commands need `-T -o BatchMode=yes -o StrictHostKeyChecking=no -o ConnectTimeout=10` or they hang.
-2. Workspace trust must be pre-set (`hasTrustDialogAccepted: true` in `~/.claude.json`) or Claude sits at the trust dialog.
+1. SSH commands need `-T -o BatchMode=yes -o StrictHostKeyChecking=no -o ConnectTimeout=10` or they hang in non-interactive sessions.
+2. Workspace trust must be pre-set (`hasTrustDialogAccepted: true` in `~/.claude.json`) or Claude sits at the trust dialog. Bootstrap handles `/root`; provisioning handles each project workspace.
 3. `--dangerously-skip-permissions` is blocked in Remote Control sessions by design. Use `allowBypassPermissions: true` in `~/.claude/settings.json` instead (root only).
 4. `claude remote-control` is a **positional** subcommand, not `--remote-control`.
 5. Use tmux, not screen.
