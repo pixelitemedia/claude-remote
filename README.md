@@ -121,9 +121,14 @@ Installed at `/usr/local/bin/claude-remote` by bootstrap (via the `project-sessi
 ```bash
 claude-remote list                       List all projects + desired vs actual state
 claude-remote status [project]           Detailed status (falls back to list)
+claude-remote sessions <project>         List prior Claude sessions for a project.
+                                         Interactive: prompts to pick one and resumes
+                                         it. Non-TTY: just prints the table.
 claude-remote start <project>            Mark desired=running and start tmux (fresh session)
-claude-remote resume <project>           Mark desired=running and start tmux, resuming
-                                         the latest prior session for the workspace
+claude-remote resume <project> [sid]     Mark desired=running and resume a session. No
+                                         sid → latest. With sid (full UUID or unique
+                                         8-char prefix) → that specific one, stopping
+                                         the current session first if one is running.
 claude-remote stop <project>             Mark desired=stopped and kill tmux
 claude-remote restart <project>          Stop then start (fresh)
 claude-remote rename <project> <label>   Set the Remote Control session label in config.json
@@ -133,6 +138,31 @@ claude-remote install                    Re-install symlinks and slash commands 
 ```
 
 State at `/var/lib/claude-remote/state.json`, log at `/var/log/claude-remote.log`.
+
+### Picking a specific prior session
+
+To switch the running project session to a specific prior conversation:
+
+```bash
+claude-remote sessions rai
+# Sessions for rai (most recent first):
+#
+# #    ID         WHEN             MSGS   FIRST USER MESSAGE
+# 1    a3f0c9d2   2026-05-11 14:30 42     check the openclaw service
+# 2    7e1b8455   2026-05-10 09:15 17     restart the docker stack
+# 3    ...
+#
+# Pick a session number to resume (Enter to cancel): 2
+```
+
+The picker stops the currently-running session (if any) and resumes the chosen one. The Remote Control label is preserved. You can also skip the picker:
+
+```bash
+claude-remote resume rai 7e1b8455     # 8-char prefix is enough if unique
+claude-remote resume rai 7e1b8455-... # full UUID also accepted
+```
+
+From root Claude's REPL, the equivalent slash command is `/sessions <project>` — Claude shows the table and asks which to pick.
 
 ### Remote Control session labels
 
@@ -157,7 +187,9 @@ Installed by bootstrap into `/root/.claude/commands/`:
 |---|---|
 | `/list-projects` | `claude-remote list` |
 | `/project-status <name>` | `claude-remote status <name>` |
-| `/start-project <name>` | `claude-remote start <name>` |
+| `/sessions <name>` | `claude-remote sessions <name>` — list prior sessions and pick one to resume |
+| `/start-project <name>` | `claude-remote start <name>` (fresh) |
+| `/resume-project <name>` | `claude-remote resume <name>` (latest prior session) |
 | `/stop-project <name>` | `claude-remote stop <name>` |
 | `/reconcile-projects` | `claude-remote reconcile` |
 

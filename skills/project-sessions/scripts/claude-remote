@@ -132,17 +132,98 @@ PY
 # Core operations
 #------------------------------------------------------------------------------
 
-# Find the most recently modified session file (.jsonl) for a project's
-# workspace. Claude Code stores sessions per-user under
-# ~/.claude/projects/<encoded-workspace>/<UUID>.jsonl, where the encoded
-# workspace is the absolute path with '/' replaced by '-'.
-latest_session_id() {
+# Path to a project's session-history directory:
+# ~/.claude/projects/<encoded-workspace>/, where encoded workspace is the
+# absolute project path with '/' replaced by '-'.
+sessions_dir() {
   local project=$1
   local dir; dir=$(project_dir "$project")
   local encoded="${dir//\//-}"
-  local sessions_dir="${CLAUDE_HOME}/.claude/projects/${encoded}"
-  [[ -d "$sessions_dir" ]] || return 1
-  ls -t "$sessions_dir"/*.jsonl 2>/dev/null | head -1 | xargs -I{} basename {} .jsonl
+  printf '%s' "${CLAUDE_HOME}/.claude/projects/${encoded}"
+}
+
+# Most recently modified session file (.jsonl) for a project's workspace.
+latest_session_id() {
+  local project=$1
+  local sdir; sdir=$(sessions_dir "$project")
+  [[ -d "$sdir" ]] || return 1
+  ls -t "$sdir"/*.jsonl 2>/dev/null | head -1 | xargs -I{} basename {} .jsonl
+}
+
+# Resolve a (possibly truncated) session id to a full UUID by prefix match
+# against ~/.claude/projects/<encoded>/*.jsonl. Exits non-zero on miss/ambiguity.
+resolve_session_id() {
+  local project=$1
+  local query=$2
+  local sdir; sdir=$(sessions_dir "$project")
+  [[ -d "$sdir" ]] || return 1
+  # Exact match first
+  if [[ -f "$sdir/$query.jsonl" ]]; then
+    printf '%s' "$query"
+    return 0
+  fi
+  local matches
+  mapfile -t matches < <(find "$sdir" -maxdepth 1 -name "${query}*.jsonl" 2>/dev/null)
+  case ${#matches[@]} in
+    0) return 1 ;;
+    1) basename "${matches[0]}" .jsonl ;;
+    *) printf 'ambiguous: %d sessions match prefix %s\n' "${#matches[@]}" "$query" >&2; return 2 ;;
+  esac
+}
+
+# Emit JSON array of session metadata for a project. Each item:
+#   { sid, mtime, mtime_h, msgs, preview }
+list_sessions_json() {
+  local project=$1
+  local sdir; sdir=$(sessions_dir "$project")
+  python3 - "$sdir" <<'PY'
+import json, sys
+from pathlib import Path
+from datetime import datetime
+sdir = Path(sys.argv[1])
+out = []
+if sdir.is_dir():
+    files = sorted(sdir.glob('*.jsonl'), key=lambda p: p.stat().st_mtime, reverse=True)
+    for f in files:
+        sid = f.stem
+        st = f.stat()
+        mtime = datetime.fromtimestamp(st.st_mtime)
+        preview = ""
+        msgs = 0
+        try:
+            with open(f, encoding="utf-8", errors="replace") as fh:
+                for line in fh:
+                    msgs += 1
+                    if preview:
+                        continue
+                    try:
+                        obj = json.loads(line)
+                    except Exception:
+                        continue
+                    if obj.get("type") != "user":
+                        continue
+                    content = obj.get("message", {}).get("content", "")
+                    if isinstance(content, list):
+                        for c in content:
+                            if isinstance(c, dict) and c.get("type") == "text":
+                                preview = c.get("text", "") or ""
+                                break
+                    elif isinstance(content, str):
+                        preview = content
+        except Exception:
+            pass
+        preview = " ".join(preview.split())
+        if len(preview) > 70:
+            preview = preview[:67] + "..."
+        out.append({
+            "sid": sid,
+            "mtime": mtime.isoformat(timespec="seconds"),
+            "mtime_h": mtime.strftime("%Y-%m-%d %H:%M"),
+            "msgs": msgs,
+            "preview": preview,
+        })
+print(json.dumps(out))
+PY
 }
 
 start_tmux() {
@@ -182,25 +263,45 @@ start_tmux() {
   fi
 }
 
-# Resume the most recent prior session for a project under Remote Control.
-# Falls back to start_tmux (fresh) if no prior session exists.
+# Resume a prior session for a project under Remote Control.
+# Usage: start_tmux_resume <project> [session_id]
+#   - With session_id: resumes that specific session. Accepts a full UUID or a
+#     unique prefix. If the project's tmux session is already running, it is
+#     killed first (stop-and-swap), since RC is single-session mode.
+#   - Without: resumes the latest session.
+# Falls back to start_tmux (fresh) when no prior session exists.
 start_tmux_resume() {
   local project=$1
+  local explicit_sid=${2:-}
   local dir; dir=$(project_dir "$project")
   local session; session=$(project_session "$project")
 
   project_exists "$project" || die "project '$project' not found at $dir"
 
-  if session_running "$session"; then
-    say "${c_yellow}~${c_reset} $session already running"
-    return 0
+  local sid
+  if [[ -n "$explicit_sid" ]]; then
+    if ! sid=$(resolve_session_id "$project" "$explicit_sid"); then
+      die "no session matching '$explicit_sid' found for project '$project' (check 'claude-remote sessions $project')"
+    fi
+  else
+    sid=$(latest_session_id "$project" 2>/dev/null || true)
+    if [[ -z "$sid" ]]; then
+      say "${c_yellow}!${c_reset} no prior session found for $project — falling back to fresh start"
+      start_tmux "$project"
+      return $?
+    fi
   fi
 
-  local sid; sid=$(latest_session_id "$project" 2>/dev/null || true)
-  if [[ -z "$sid" ]]; then
-    say "${c_yellow}!${c_reset} no prior session found for $project — falling back to fresh start"
-    start_tmux "$project"
-    return $?
+  if session_running "$session"; then
+    if [[ -n "$explicit_sid" ]]; then
+      say "${c_blue}==>${c_reset} stopping $session to swap to session ${sid:0:8}"
+      logmsg "stopping $session to swap to $sid"
+      sudo -u "$CLAUDE_USER" tmux kill-session -t "$session"
+      sleep 0.3
+    else
+      say "${c_yellow}~${c_reset} $session already running"
+      return 0
+    fi
   fi
 
   local label; label=$(session_label "$project")
@@ -339,9 +440,58 @@ cmd_start() {
 cmd_resume() {
   ensure_state
   local project=${1:-}
-  [[ -n "$project" ]] || die "usage: claude-remote resume <project>"
+  local sid=${2:-}
+  [[ -n "$project" ]] || die "usage: claude-remote resume <project> [session_id]"
   state_update "$project" desired_state=running last_started="$(ts)"
-  start_tmux_resume "$project"
+  start_tmux_resume "$project" "$sid"
+}
+
+cmd_sessions() {
+  ensure_state
+  local project=${1:-}
+  [[ -n "$project" ]] || die "usage: claude-remote sessions <project>"
+  project_exists "$project" || die "project '$project' not found at $(project_dir "$project")"
+
+  local json
+  json=$(list_sessions_json "$project")
+  local count
+  count=$(printf '%s' "$json" | python3 -c 'import json,sys; print(len(json.load(sys.stdin)))')
+
+  if [[ "$count" -eq 0 ]]; then
+    say "${c_yellow}No prior sessions for project '$project'.${c_reset}"
+    say "Start a fresh one: claude-remote start $project"
+    return 0
+  fi
+
+  say "Sessions for ${c_blue}$project${c_reset} (most recent first):"
+  echo
+  printf '%-4s %-10s %-16s %-6s %s\n' "#" "ID" "WHEN" "MSGS" "FIRST USER MESSAGE"
+  printf '%s\n' "$json" | python3 - <<'PY'
+import json, sys
+data = json.load(sys.stdin)
+for i, s in enumerate(data, 1):
+    print(f"{i:<4} {s['sid'][:8]:<10} {s['mtime_h']:<16} {s['msgs']:<6} {s['preview']}")
+PY
+
+  # Only prompt to pick if both stdin and stdout are TTYs (interactive use).
+  # Slash commands / scripts get the table back and call resume themselves.
+  if [[ -t 0 && -t 1 ]]; then
+    echo
+    local choice
+    read -r -p "Pick a session number to resume (Enter to cancel): " choice || return 0
+    [[ -z "$choice" ]] && { say "(cancelled)"; return 0; }
+    [[ "$choice" =~ ^[0-9]+$ ]] || die "invalid selection: $choice"
+    (( choice >= 1 && choice <= count )) || die "out of range: $choice (have $count)"
+
+    local chosen_sid
+    chosen_sid=$(printf '%s' "$json" | python3 -c "import json, sys; print(json.load(sys.stdin)[$((choice - 1))]['sid'])")
+    echo
+    cmd_resume "$project" "$chosen_sid"
+  else
+    echo
+    say "To resume a specific session: claude-remote resume $project <id>"
+    say "(IDs can be the 8-char prefix shown above as long as it's unique)"
+  fi
 }
 
 cmd_stop() {
@@ -431,6 +581,7 @@ require_root
 case "${1:-list}" in
   list)        shift || true; cmd_list "$@" ;;
   status)      shift; cmd_status "$@" ;;
+  sessions)    shift; cmd_sessions "$@" ;;
   start)       shift; cmd_start "$@" ;;
   resume)      shift; cmd_resume "$@" ;;
   stop)        shift; cmd_stop "$@" ;;
@@ -443,18 +594,23 @@ case "${1:-list}" in
 Usage: claude-remote <command> [args]
 
 Commands:
-  list                       List all projects with desired and actual states (default)
-  status [project]           Show detailed status (falls back to list if no project)
-  start <project>            Mark desired=running and start tmux (fresh session)
-  resume <project>           Mark desired=running and start tmux, resuming the
-                             latest prior session for that project's workspace
-  stop <project>             Mark desired=stopped and kill tmux session
-  restart <project>          Stop then start (fresh)
-  rename <project> <label>   Set the Remote Control session label in config.json
-  reconcile                  For any desired=running project whose session is
-                             down, bring it back via 'resume' (intended for
-                             cron, every few minutes)
-  install                    Symlink the CLI and slash commands; create state dir
+  list                          List all projects with desired and actual states (default)
+  status [project]              Show detailed status (falls back to list if no project)
+  sessions <project>            List prior Claude sessions for a project; when run
+                                interactively, prompts to pick one and resumes it
+                                (stopping the current session if one is up)
+  start <project>               Mark desired=running and start tmux (fresh session)
+  resume <project> [sid]        Mark desired=running and resume a session. With no
+                                sid, picks the latest. With an sid (full UUID or
+                                unique 8-char prefix), resumes that specific one —
+                                stops the current session first if it's running.
+  stop <project>                Mark desired=stopped and kill tmux session
+  restart <project>             Stop then start (fresh)
+  rename <project> <label>      Set the Remote Control session label in config.json
+  reconcile                     For any desired=running project whose session is
+                                down, bring it back via 'resume' (intended for
+                                cron, every few minutes)
+  install                       Symlink the CLI and slash commands; create state dir
 EOF
     ;;
   *) die "unknown command: $1 (try --help)" ;;

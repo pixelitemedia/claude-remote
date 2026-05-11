@@ -14,16 +14,22 @@ Important: this is the top-level `--remote-control` flag, **not** the `claude re
 Everything is built on one CLI: **`claude-remote`** (installed at `/usr/local/bin/claude-remote` after first run of `claude-remote install`).
 
 ```
-claude-remote list                List all projects + desired vs actual state
-claude-remote status [project]    Detailed status (falls back to list)
-claude-remote start <project>     Mark desired=running, start tmux (fresh session)
-claude-remote resume <project>    Mark desired=running, start tmux, resume the
-                                  latest prior session for the workspace
-claude-remote stop <project>      Mark desired=stopped, kill tmux session
-claude-remote restart <project>   Stop then start (fresh)
-claude-remote reconcile           For each desired=running project that's down,
-                                  bring it back via resume (history preserved)
-claude-remote install             Symlink the CLI and slash commands; create state dir
+claude-remote list                       List all projects + desired vs actual state
+claude-remote status [project]           Detailed status (falls back to list)
+claude-remote sessions <project>         List prior Claude sessions for a project.
+                                         Interactive: prompts to pick one and
+                                         resumes it (stop+swap if one is running).
+                                         Non-TTY: just prints the list.
+claude-remote start <project>            Mark desired=running, start tmux (fresh session)
+claude-remote resume <project> [sid]     Mark desired=running, resume a session.
+                                         No sid → latest. With sid (full UUID or
+                                         unique 8-char prefix) → that specific one,
+                                         stopping the current session first.
+claude-remote stop <project>             Mark desired=stopped, kill tmux session
+claude-remote restart <project>          Stop then start (fresh)
+claude-remote reconcile                  For each desired=running project that's down,
+                                         bring it back via resume (history preserved)
+claude-remote install                    Symlink the CLI and slash commands; create state dir
 ```
 
 State lives at `/var/lib/claude-remote/state.json`. Log lives at `/var/log/claude-remote.log`.
@@ -36,6 +42,7 @@ Once `claude-remote install` has run, these are available in root Claude:
 |---|---|
 | `/list-projects` | `claude-remote list` |
 | `/project-status <name>` | `claude-remote status <name>` |
+| `/sessions <name>` | `claude-remote sessions <name>` — list prior sessions, pick one to resume |
 | `/start-project <name>` | `claude-remote start <name>` (fresh) |
 | `/resume-project <name>` | `claude-remote resume <name>` (continue latest) |
 | `/stop-project <name>` | `claude-remote stop <name>` |
