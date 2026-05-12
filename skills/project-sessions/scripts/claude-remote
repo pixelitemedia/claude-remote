@@ -552,48 +552,120 @@ cmd_restart() {
   cmd_start "$project"
 }
 
-# delete — built up incrementally.
-# Steps implemented: 1 (stop session), 2 (rm dir), 3 (drop state entry).
-# Pending: 4 (session history), 5 (remote pubkey removal).
+# Remote authorized_keys cleanup — script sent over SSH to each host so the
+# match-and-remove happens atomically with safety guards (refuses if the
+# result would empty authorized_keys and lock the user out).
+REMOTE_KEY_CLEANUP_SCRIPT='set -e
+PUBKEY="$1"
+AUTH=~/.ssh/authorized_keys
+[ -f "$AUTH" ] || { echo no_auth_file; exit 0; }
+grep -qxF "$PUBKEY" "$AUTH" || { echo not_present; exit 0; }
+TMP=$(mktemp)
+grep -vxF "$PUBKEY" "$AUTH" > "$TMP" 2>/dev/null || true
+if [ ! -s "$TMP" ]; then
+  rm -f "$TMP"
+  echo refuse_would_be_empty
+  exit 1
+fi
+cp "$AUTH" "$AUTH.bak.claude-remote.$(date +%s)"
+mv "$TMP" "$AUTH"
+chmod 600 "$AUTH"
+echo removed'
+
+# Iterate hosts in a project config.json, emitting "user\thostname" lines.
+list_hosts_for_project() {
+  local cfg=$1
+  python3 - "$cfg" <<'PY'
+import json, sys
+try:
+    with open(sys.argv[1]) as f:
+        cfg = json.load(f)
+except Exception:
+    sys.exit(0)
+for h in cfg.get("hosts", []):
+    user = h.get("user", "")
+    host = h.get("hostname", "")
+    if user and host:
+        print(f"{user}\t{host}")
+PY
+}
+
+# delete — full implementation (steps 1-5).
+# Default behavior: stop session, scrub pubkey from remote authorized_keys,
+# rm project dir, rm session history, drop state entry.
+# Opt-outs: --keep-history (skip step 4), --keep-remote-keys (skip step 5).
 cmd_delete() {
   ensure_state
   local project=""
   local assume_yes=0
+  local keep_history=0
+  local keep_remote_keys=0
   while [[ $# -gt 0 ]]; do
     case "$1" in
-      -y|--yes) assume_yes=1 ;;
-      -*)       die "unknown flag: $1 (usage: claude-remote delete <project> [--yes])" ;;
-      *)        [[ -z "$project" ]] && project=$1 || die "unexpected argument: $1" ;;
+      -y|--yes)            assume_yes=1 ;;
+      --keep-history)      keep_history=1 ;;
+      --keep-remote-keys)  keep_remote_keys=1 ;;
+      -*)                  die "unknown flag: $1" ;;
+      *)                   [[ -z "$project" ]] && project=$1 || die "unexpected argument: $1" ;;
     esac
     shift
   done
-  [[ -n "$project" ]] || die "usage: claude-remote delete <project> [--yes]"
+  [[ -n "$project" ]] || die "usage: claude-remote delete <project> [--yes] [--keep-history] [--keep-remote-keys]"
 
   local dir; dir=$(project_dir "$project")
   local session; session=$(project_session "$project")
-  local has_dir=0 has_state=0
+  local cfg="$dir/config.json"
+  local pubkey_path="$dir/key.pub"
+  local history_dir; history_dir=$(sessions_dir "$project")
+
+  local has_dir=0 has_state=0 has_history=0 has_cfg=0 has_pubkey=0
   [[ -d "$dir" ]] && has_dir=1
   [[ -n "$(state_get "$project" desired_state)" || -n "$(state_get "$project" last_started)" ]] && has_state=1
+  [[ -d "$history_dir" ]] && has_history=1
+  [[ -f "$cfg" ]] && has_cfg=1
+  [[ -f "$pubkey_path" ]] && has_pubkey=1
 
-  if [[ $has_dir -eq 0 && $has_state -eq 0 ]] && ! session_running "$session"; then
-    die "no trace of project '$project' (no dir, no state, no session)"
+  if [[ $has_dir -eq 0 && $has_state -eq 0 && $has_history -eq 0 ]] && ! session_running "$session"; then
+    die "no trace of project '$project' (no dir, no state, no history, no session)"
   fi
 
+  # Capture pubkey + host list BEFORE step 2 removes the dir.
+  local pubkey="" host_count=0
+  [[ $has_pubkey -eq 1 ]] && pubkey=$(cat "$pubkey_path")
+  if [[ $has_cfg -eq 1 ]]; then
+    host_count=$(list_hosts_for_project "$cfg" | grep -c $'\t' || true)
+  fi
+
+  # Plan preview
   say "${c_blue}==>${c_reset} delete plan for '$project'"
-  if [[ $has_dir -eq 1 ]]; then
-    say "    directory:    $dir   ${c_red}(will be removed)${c_reset}"
-  else
-    say "    directory:    (already gone)"
-  fi
   if session_running "$session"; then
-    say "    tmux session: $session   ${c_red}(running — will be stopped)${c_reset}"
+    say "    tmux session:    $session   ${c_red}(running — will be stopped)${c_reset}"
   else
-    say "    tmux session: $session   (not running)"
+    say "    tmux session:    $session   (not running)"
+  fi
+  if [[ $keep_remote_keys -eq 1 ]]; then
+    say "    remote keys:     (kept — --keep-remote-keys)"
+  elif [[ $host_count -gt 0 && $has_pubkey -eq 1 ]]; then
+    say "    remote keys:     ${host_count} host(s)   ${c_red}(pubkey will be scrubbed from each)${c_reset}"
+  else
+    say "    remote keys:     (nothing to clean — no hosts or no pubkey)"
+  fi
+  if [[ $has_dir -eq 1 ]]; then
+    say "    directory:       $dir   ${c_red}(will be removed)${c_reset}"
+  else
+    say "    directory:       (already gone)"
+  fi
+  if [[ $keep_history -eq 1 ]]; then
+    say "    session history: $([[ $has_history -eq 1 ]] && printf '%s' "$history_dir" || printf '(none)')   (kept — --keep-history)"
+  elif [[ $has_history -eq 1 ]]; then
+    say "    session history: $history_dir   ${c_red}(will be removed)${c_reset}"
+  else
+    say "    session history: (none)"
   fi
   if [[ $has_state -eq 1 ]]; then
-    say "    state.json:   projects.$project   ${c_red}(will be removed)${c_reset}"
+    say "    state.json:      projects.$project   ${c_red}(will be removed)${c_reset}"
   else
-    say "    state.json:   (no entry)"
+    say "    state.json:      (no entry)"
   fi
   echo
 
@@ -612,41 +684,75 @@ cmd_delete() {
     fi
   fi
 
-  # Step 1: stop the session if it's running
+  # Stop session (step 1) — must come before SSH cleanup so the session
+  # doesn't write any new files while we're tearing down.
   if session_running "$session"; then
-    say "${c_blue}==>${c_reset} step 1: stopping session"
+    say "${c_blue}==>${c_reset} stopping session"
     cmd_stop "$project"
   else
-    say "${c_yellow}~${c_reset} step 1: session not running, nothing to stop"
+    say "${c_yellow}~${c_reset} session not running, skipping stop"
   fi
 
-  # Step 2: rm -rf the project directory
+  # Remote authorized_keys cleanup (step 5 — runs BEFORE dir removal because
+  # we need the project's private key on disk to authenticate).
+  if [[ $keep_remote_keys -eq 0 && $host_count -gt 0 && $has_pubkey -eq 1 ]]; then
+    say "${c_blue}==>${c_reset} scrubbing pubkey from remote authorized_keys"
+    while IFS=$'\t' read -r host_user host_name; do
+      [[ -z "$host_user" || -z "$host_name" ]] && continue
+      local result
+      if ! result=$(printf '%s' "$REMOTE_KEY_CLEANUP_SCRIPT" \
+        | sudo -u "$CLAUDE_USER" ssh -T -o BatchMode=yes -o StrictHostKeyChecking=no -o ConnectTimeout=10 \
+            -i "$dir/key" "${host_user}@${host_name}" \
+            bash -s -- "$pubkey" 2>&1); then
+        say "    ${c_yellow}!${c_reset} ${host_user}@${host_name}: SSH failed (non-fatal): ${result:0:80}"
+        logmsg "delete: ssh cleanup failed for $project on ${host_user}@${host_name}"
+        continue
+      fi
+      result=$(printf '%s' "$result" | tail -1)
+      case "$result" in
+        removed)              say "    ${c_green}✓${c_reset} ${host_user}@${host_name}: removed" ;;
+        not_present)          say "    ${c_yellow}~${c_reset} ${host_user}@${host_name}: pubkey not present" ;;
+        no_auth_file)         say "    ${c_yellow}~${c_reset} ${host_user}@${host_name}: no authorized_keys file" ;;
+        refuse_would_be_empty) say "    ${c_red}!${c_reset} ${host_user}@${host_name}: REFUSED — would empty authorized_keys" ;;
+        *)                    say "    ${c_yellow}!${c_reset} ${host_user}@${host_name}: unexpected result: $result" ;;
+      esac
+    done < <(list_hosts_for_project "$cfg")
+  elif [[ $keep_remote_keys -eq 1 ]]; then
+    say "${c_yellow}~${c_reset} skipping remote-key cleanup (--keep-remote-keys)"
+  fi
+
+  # Remove project directory (step 2)
   if [[ $has_dir -eq 1 ]]; then
-    say "${c_blue}==>${c_reset} step 2: removing $dir"
+    say "${c_blue}==>${c_reset} removing $dir"
     rm -rf "$dir"
-    if [[ -d "$dir" ]]; then
-      die "failed to remove $dir"
-    fi
+    [[ -d "$dir" ]] && die "failed to remove $dir"
     say "${c_green}✓${c_reset} removed $dir"
-    logmsg "delete: removed dir $dir for project $project"
+    logmsg "delete: removed dir $dir for $project"
   else
-    say "${c_yellow}~${c_reset} step 2: directory already gone"
+    say "${c_yellow}~${c_reset} directory already gone"
   fi
 
-  # Step 3: drop the state.json entry
+  # Remove session history (step 4)
+  if [[ $keep_history -eq 0 && $has_history -eq 1 ]]; then
+    say "${c_blue}==>${c_reset} removing session history $history_dir"
+    rm -rf "$history_dir"
+    say "${c_green}✓${c_reset} history removed"
+    logmsg "delete: removed history $history_dir for $project"
+  elif [[ $keep_history -eq 1 && $has_history -eq 1 ]]; then
+    say "${c_yellow}~${c_reset} skipping session-history removal (--keep-history)"
+  fi
+
+  # Drop state entry last (step 3) — so an interrupted delete leaves the
+  # state entry as a marker rather than silently orphaning the on-disk parts.
   if [[ $has_state -eq 1 ]]; then
-    say "${c_blue}==>${c_reset} step 3: dropping projects.$project from state.json"
+    say "${c_blue}==>${c_reset} clearing state.json entry"
     state_remove_project "$project"
     say "${c_green}✓${c_reset} state entry removed"
     logmsg "delete: removed state entry for $project"
-  else
-    say "${c_yellow}~${c_reset} step 3: no state entry to remove"
   fi
 
   echo
-  say "${c_yellow}!${c_reset} delete is partial — steps 1-3 done. Steps 4-5 still pending:"
-  say "    4. (optional) rm -rf ~/.claude/projects/${dir//\//-}/   # session history"
-  say "    5. (optional) remove this project's pubkey from each host's authorized_keys"
+  say "${c_green}✓${c_reset} delete complete"
 }
 
 cmd_reconcile() {
@@ -1077,11 +1183,13 @@ Commands:
                                 stops the current session first if it's running.
   stop <project>                Mark desired=stopped and kill tmux session
   restart <project>             Stop then start (fresh)
-  delete <project> [--yes]      Remove a project. Steps 1-3: stops session,
-                                removes /home/claude/<project>/, drops the
-                                state.json entry. Prompts for confirmation
-                                unless --yes. Steps 4-5 (optional session-
-                                history and remote-key cleanup) pending.
+  delete <project> [flags]      Fully remove a project: stop session, scrub
+                                pubkey from each host's authorized_keys, rm
+                                project dir, rm session history, drop state
+                                entry. Flags:
+                                  --yes                skip confirmation
+                                  --keep-history       leave session JSONLs
+                                  --keep-remote-keys   skip SSH cleanup
   rename <project> <label>      Set the Remote Control session label in config.json
   reconcile                     For any desired=running project whose session is
                                 down, bring it back via 'resume' (intended for
