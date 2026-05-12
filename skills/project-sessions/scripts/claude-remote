@@ -537,6 +537,60 @@ cmd_restart() {
   cmd_start "$project"
 }
 
+# delete — built up incrementally. Currently implements only step 1:
+# stop the session if it's running. Subsequent steps will add: remove the
+# project directory, clear its state entry, optionally clean up session
+# history, and optionally remove the project's pubkey from each host's
+# authorized_keys.
+cmd_delete() {
+  ensure_state
+  local project=${1:-}
+  [[ -n "$project" ]] || die "usage: claude-remote delete <project>"
+
+  local dir; dir=$(project_dir "$project")
+  local session; session=$(project_session "$project")
+  local has_dir=0 has_state=0
+  [[ -d "$dir" ]] && has_dir=1
+  [[ -n "$(state_get "$project" desired_state)" || -n "$(state_get "$project" last_started)" ]] && has_state=1
+
+  if [[ $has_dir -eq 0 && $has_state -eq 0 ]] && ! session_running "$session"; then
+    die "no trace of project '$project' (no dir, no state, no session)"
+  fi
+
+  say "${c_blue}==>${c_reset} delete plan for '$project'"
+  if [[ $has_dir -eq 1 ]]; then
+    say "    directory:    $dir   ${c_yellow}(will be removed in step 2)${c_reset}"
+  else
+    say "    directory:    (already gone)"
+  fi
+  if session_running "$session"; then
+    say "    tmux session: $session   ${c_blue}(running — will stop now)${c_reset}"
+  else
+    say "    tmux session: $session   (not running)"
+  fi
+  if [[ $has_state -eq 1 ]]; then
+    say "    state.json:   projects.$project   ${c_yellow}(will be removed in step 3)${c_reset}"
+  else
+    say "    state.json:   (no entry)"
+  fi
+  echo
+
+  # Step 1: stop the session if it's running.
+  if session_running "$session"; then
+    say "${c_blue}==>${c_reset} step 1: stopping session"
+    cmd_stop "$project"
+  else
+    say "${c_yellow}~${c_reset} step 1: session not running, nothing to stop"
+  fi
+
+  echo
+  say "${c_yellow}!${c_reset} delete is partial — step 1 only. Steps 2-5 not yet implemented:"
+  say "    2. rm -rf $dir"
+  say "    3. drop projects.$project from state.json"
+  say "    4. (optional) rm -rf ~/.claude/projects/${dir//\//-}/   # session history"
+  say "    5. (optional) remove this project's pubkey from each host's authorized_keys"
+}
+
 cmd_reconcile() {
   ensure_state
   local drift=0 total=0
@@ -943,6 +997,7 @@ case "${1:-list}" in
   resume)      shift; cmd_resume "$@" ;;
   stop)        shift; cmd_stop "$@" ;;
   restart)     shift; cmd_restart "$@" ;;
+  delete)      shift; cmd_delete "$@" ;;
   rename)      shift; cmd_rename "$@" ;;
   reconcile)   shift || true; cmd_reconcile "$@" ;;
   install)     shift || true; cmd_install "$@" ;;
@@ -964,6 +1019,9 @@ Commands:
                                 stops the current session first if it's running.
   stop <project>                Mark desired=stopped and kill tmux session
   restart <project>             Stop then start (fresh)
+  delete <project>              Remove a project. INCOMPLETE — step 1 only:
+                                stops the session and prints what later steps
+                                will remove (dir, state, history, remote keys).
   rename <project> <label>      Set the Remote Control session label in config.json
   reconcile                     For any desired=running project whose session is
                                 down, bring it back via 'resume' (intended for
