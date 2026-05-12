@@ -21,7 +21,7 @@ LOG_FILE="/var/log/claude-remote.log"
 ROOT_SESSION="claude-root"
 ROOT_DIR="/root"
 ROOT_CLAUDE_BIN="/root/.local/bin/claude"
-ROOT_DEFAULT_LABEL="🛠️🌐 - Relay Root"
+ROOT_DEFAULT_LABEL="🛠️ 🌐 🧠 - Sysadmin (root)"
 
 c_blue=$'\033[1;34m'
 c_green=$'\033[1;32m'

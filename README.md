@@ -151,7 +151,7 @@ claude-remote root resume <sid>     # resume a specific session
 claude-remote root sessions         # interactive picker over prior sessions
 claude-remote root stop             # mark desired=stopped (disenrolls from reconcile)
 claude-remote root status           # current state (running, desired, label)
-claude-remote root rename "<label>" # change the Remote Control label (default "🛠️🌐 - Relay Root")
+claude-remote root rename "<label>" # change the Remote Control label (default "🛠️ 🌐 🧠 - Sysadmin (root)")
 ```
 
 Once `desired_state=running` is set, the reconciler treats root just like any other project: if the `claude-root` tmux session goes down, it gets resumed (history preserved) on the next cron tick. Stopping with `claude-remote root stop` disenrolls it — useful when you're done administering for the night and want the reconciler to leave it alone.

@@ -49,7 +49,7 @@ claude-remote root stop           # mark desired=stopped, kill tmux (disenrolls 
 
 State for root lives under `state.json` → `root` (label, desired_state, last_started/stopped/reconciled). The reconciler treats `root.desired_state=running` exactly like a project: if the tmux session is down, resume via `claude -r <sid> --remote-control -n "<label>" ''`.
 
-Default label is `🛠️🌐 - Relay Root`; override with `claude-remote root rename "<label>"`.
+Default label is `🛠️ 🌐 🧠 - Sysadmin (root)`; override with `claude-remote root rename "<label>"`.
 
 State lives at `/var/lib/claude-remote/state.json`. Log lives at `/var/log/claude-remote.log`.
 
