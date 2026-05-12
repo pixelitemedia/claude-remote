@@ -699,11 +699,15 @@ cmd_delete() {
     say "${c_blue}==>${c_reset} scrubbing pubkey from remote authorized_keys"
     while IFS=$'\t' read -r host_user host_name; do
       [[ -z "$host_user" || -z "$host_name" ]] && continue
-      local result
+      local result pubkey_q
+      # ssh joins post-host args with spaces and does NOT preserve quoting, so
+      # passing "$pubkey" as a separate arg gets reparsed remotely as four
+      # words. Shell-quote it and embed in the command string.
+      pubkey_q=$(python3 -c 'import shlex, sys; print(shlex.quote(sys.argv[1]))' "$pubkey")
       if ! result=$(printf '%s' "$REMOTE_KEY_CLEANUP_SCRIPT" \
         | sudo -u "$CLAUDE_USER" ssh -T -o BatchMode=yes -o StrictHostKeyChecking=no -o ConnectTimeout=10 \
             -i "$dir/key" "${host_user}@${host_name}" \
-            bash -s -- "$pubkey" 2>&1); then
+            "bash -s -- $pubkey_q" 2>&1); then
         say "    ${c_yellow}!${c_reset} ${host_user}@${host_name}: SSH failed (non-fatal): ${result:0:80}"
         logmsg "delete: ssh cleanup failed for $project on ${host_user}@${host_name}"
         continue
