@@ -120,7 +120,10 @@ fi
 log "Installing security packages"
 export DEBIAN_FRONTEND=noninteractive
 apt-get update -qq
-apt-get install -y -qq ufw fail2ban unattended-upgrades tmux >/dev/null
+apt-get install -y -qq ufw fail2ban unattended-upgrades tmux python3 curl git cron logrotate >/dev/null
+# Ensure cron and ssh services are enabled (defensive — typically already on)
+systemctl enable --now cron 2>/dev/null || true
+systemctl enable --now ssh  2>/dev/null || systemctl enable --now sshd 2>/dev/null || true
 ok "Packages installed"
 
 #------------------------------------------------------------------------------
