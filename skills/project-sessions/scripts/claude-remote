@@ -817,11 +817,15 @@ cmd_health() {
 
   # --- system alerts
   if [[ -s "$alerts_file" ]]; then
-    local recent_count
-    recent_count=$(grep -c "^- $(date -u +%Y-%m-%d)" "$alerts_file" 2>/dev/null || echo 0)
+    local recent_count today
+    today=$(date -u +%Y-%m-%d)
+    # grep -c prints "0" AND exits 1 when there are zero matches; the obvious
+    # `|| echo 0` fallback would then emit TWO lines and break the comparison.
+    recent_count=$(grep -c "^- ${today}" "$alerts_file" 2>/dev/null || true)
+    recent_count=${recent_count:-0}
     if [[ "$recent_count" -gt 0 ]]; then
       say "${c_yellow}System alerts (today, $recent_count):${c_reset}"
-      grep "^- $(date -u +%Y-%m-%d)" "$alerts_file" | tail -10 | sed 's/^/  /'
+      grep "^- ${today}" "$alerts_file" | tail -10 | sed 's/^/  /'
       warn_count=$((warn_count + 1))
     else
       say "System alerts: $alerts_file exists but no entries from today"
