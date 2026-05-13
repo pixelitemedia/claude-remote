@@ -53,25 +53,36 @@ Three skills, used in order:
 
 On a fresh relay droplet, logged in as root:
 
+**One-liner (recommended)** — run as root on a fresh droplet that already has your SSH key authorized:
+
 ```bash
-git clone https://github.com/pixelitemedia/claude-remote.git ~/claude-remote
-cd ~/claude-remote
+curl -fsSL https://raw.githubusercontent.com/pixelitemedia/claude-remote/main/install.sh | bash
 ```
 
-Then start Claude Code from `~/claude-remote` (so the three skills under `skills/` are picked up — symlink them into `/root/.claude/skills/` if needed) and follow the conversational flow below.
+That clones the repo into `/root/claude-remote/`, installs the Claude Code CLI for root if missing, and runs the bootstrap unattended. Set `INTERACTIVE=1` to get the lockout-risk + cron prompts.
 
-### 1. Bootstrap the relay (once)
+**Manual** — clone and drive Claude conversationally instead:
 
+```bash
+git clone https://github.com/pixelitemedia/claude-remote.git /root/claude-remote
+cd /root/claude-remote
 ```
-You: set up sysadmin
-```
 
-Claude will:
-1. Inspect `/root/.ssh/authorized_keys`, report fingerprints, and ask you to confirm you can SSH in with one of them from a second terminal.
-2. Run `bash skills/server-sysadmin-bootstrap/scripts/bootstrap.sh` after you confirm.
-3. The script hardens the server (UFW, fail2ban, unattended-upgrades, key-only SSH, 1GB swap), creates the `claude` user, installs `claude.sh` and `claude-remote`, and prompts to install the 5-minute reconcile cron.
+Then start Claude Code from `/root/claude-remote` and say **"set up sysadmin"**.
 
-Re-running is safe — the script is idempotent.
+### What bootstrap does
+
+1. Inspects `/root/.ssh/authorized_keys` — refuses to run unless a valid key is present.
+2. Hardens the server: UFW (port 22 only), fail2ban, unattended-upgrades, key-only SSH, 1GB swap, `PermitRootLogin prohibit-password`.
+3. Creates the `claude` user with passwordless sudo and mirrors root's `authorized_keys`.
+4. Sets `allowBypassPermissions: true` for both root and the `claude` user (Remote Control sessions can't bypass prompts otherwise, which is unusable from a phone).
+5. Installs Claude Code CLI per-user (`/root/.local/bin/claude` and `/home/claude/.local/bin/claude`).
+6. Symlinks `claude.sh` and `claude-remote` into `/usr/local/bin/`.
+7. Symlinks slash commands (`/list-projects`, `/start-project`, …) into `/root/.claude/commands/`.
+8. Installs `/etc/logrotate.d/claude-remote` (weekly rotation, 4 weeks retained, compressed).
+9. Offers to install cron entries (see [Cron](#cron) below).
+
+Re-running is safe — every step is idempotent.
 
 ### 2. Provision a project (once per target server)
 
@@ -211,16 +222,33 @@ Installed by bootstrap into `/root/.claude/commands/`:
 | `/resume-project <name>` | `claude-remote resume <name>` (latest prior session) |
 | `/stop-project <name>` | `claude-remote stop <name>` |
 | `/reconcile-projects` | `claude-remote reconcile` |
+| `/health` | `claude-remote health` — disk, sessions, alerts, cron status |
 
 ### Cron
 
-Bootstrap offers to install:
+Bootstrap offers to install three entries to root's crontab:
 
 ```
 */5 * * * * /usr/local/bin/claude-remote reconcile
+17 */2 * * * /usr/local/bin/check-disk-alerts.sh 90
+23 4 * * 0 /usr/local/bin/claude-update.sh
 ```
 
-Pure shell, no LLM cost. See [`cron.example`](skills/project-sessions/references/cron.example) for an optional Haiku-driven hourly health check.
+- **reconcile** (every 5 min) — restart any `desired=running` session that's down. Pure shell, no LLM cost.
+- **check-disk-alerts.sh** (every 2 hours) — appends to `/root/.claude/system-alerts.md` if any non-tmpfs partition is ≥ 90% used. Root Claude reads that file at session start and surfaces today's entries (see `/root/CLAUDE.md`).
+- **claude-update.sh** (weekly Sun 04:23 UTC) — re-runs the Claude Code installer for both root and the claude user, brings them to the latest version. **Skipped automatically if any tmux session is running** so we never yank a binary out from under a live phone connection.
+
+Log rotation: `/var/log/claude-remote.log` and `/var/log/claude-update.log` are weekly-rotated (4 weeks retained, compressed) via `/etc/logrotate.d/claude-remote`.
+
+See [`cron.example`](skills/project-sessions/references/cron.example) for an optional Haiku-driven hourly health check on top of these.
+
+### Health check
+
+```bash
+claude-remote health   # or /health from root Claude
+```
+
+Reports: total disk usage of `~/.claude/projects/`, per-workspace session counts and size, current partition usage, today's system alerts, and whether all three cron entries are installed. Color-flags concerns advisory only (no auto-action) — yellow for ≥ 200 sessions or ≥ 1G in one workspace, ≥ 80% partition usage, or missing cron entries.
 
 ## Key gotchas
 

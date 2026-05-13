@@ -244,6 +244,27 @@ PY
   ok "allowBypassPermissions enabled for root"
 fi
 
+# allowBypassPermissions for the claude user too. Without this, every project
+# Claude session prompts for every Bash/Edit operation — unworkable from
+# Remote Control on a phone where --dangerously-skip-permissions is blocked.
+# The claude user is already sandboxed by per-project SSH key scoping, so
+# bypassing prompts mirrors the trust model already in place.
+install -d -o "$CLAUDE_USER" -g "$CLAUDE_USER" -m 0700 "${CLAUDE_HOME}/.claude"
+CLAUDE_USER_SETTINGS="${CLAUDE_HOME}/.claude/settings.json"
+if ! sudo -u "$CLAUDE_USER" test -f "$CLAUDE_USER_SETTINGS"; then
+  sudo -u "$CLAUDE_USER" bash -c "echo '{}' > $CLAUDE_USER_SETTINGS"
+fi
+if command -v python3 >/dev/null 2>&1; then
+  sudo -u "$CLAUDE_USER" python3 - <<PY
+import json, pathlib
+p = pathlib.Path("$CLAUDE_USER_SETTINGS")
+data = json.loads(p.read_text() or "{}")
+data["allowBypassPermissions"] = True
+p.write_text(json.dumps(data, indent=2))
+PY
+  ok "allowBypassPermissions enabled for ${CLAUDE_USER}"
+fi
+
 #------------------------------------------------------------------------------
 # 11. Starter /root/CLAUDE.md
 #------------------------------------------------------------------------------
@@ -255,6 +276,14 @@ if [[ ! -f /root/CLAUDE.md ]]; then
 You are root Claude on the relay. Your job is to manage the relay itself,
 provision new project workspaces under /home/claude/<project>/, and manage
 the lifecycle of project Claude sessions.
+
+## At session start: check system alerts
+
+Before the first user message of a session, read `/root/.claude/system-alerts.md`
+if it exists. The disk-monitor cron writes there when any partition crosses
+90% usage. If there are recent entries (today's date), surface them to the
+user as a leading note. After they're acknowledged, the user can clear the
+file with `> /root/.claude/system-alerts.md` (or let it grow — it's append-only).
 
 ## Skills you have
 
@@ -269,13 +298,23 @@ the lifecycle of project Claude sessions.
 - Stop a project: `/stop-project <name>` or `claude-remote stop <name>`
 - Reconcile drift: `/reconcile-projects` or `claude-remote reconcile`
 - Provision a new project: invoke the `server-sysadmin` skill
-- Root tmux session: `claude.sh` (start/reattach), `claude.sh stop`
+- Relay health: `claude-remote health` (disk, session counts, alerts)
+
+## Root session itself
+
+Your tmux session (claude-root) is opt-in persistent. To enroll in cron's
+auto-resume so a crash brings you back with history intact:
+
+    claude-remote root start         # or 'resume' if you have a prior session
+
+To stop and disenroll: `claude-remote root stop`. Manual attach (no state
+tracking): `claude.sh`.
 
 ## Hard rules
 
 - Do NOT SSH into target servers from the root session — that is the project
   Claude's job, using its own per-project key.
-- Stop the root session when not actively provisioning or managing: `claude.sh stop`.
+- Stop the root session when not actively provisioning or managing.
 EOF
   ok "/root/CLAUDE.md written"
 else
@@ -352,31 +391,79 @@ if [[ -x "$RELAY_CLI" ]]; then
   log "Chaining into project-sessions install"
   "$RELAY_CLI" install
   ok "project-sessions installed"
-
-  # Offer to install the cron reconciler.
-  CRON_LINE='*/5 * * * * /usr/local/bin/claude-remote reconcile'
-  install_cron=0
-  if [[ $ASSUME_YES -eq 1 ]]; then
-    install_cron=1
-  elif [[ -t 0 ]]; then
-    read -r -p "Install cron reconciler ('${CRON_LINE}') for root? [y/N] " ans
-    [[ "$ans" =~ ^[Yy]$ ]] && install_cron=1
-  fi
-
-  if [[ $install_cron -eq 1 ]]; then
-    # Replace any existing claude-remote reconcile line, preserve the rest.
-    if (crontab -l 2>/dev/null | grep -v 'claude-remote reconcile'; echo "$CRON_LINE") | crontab -; then
-      ok "Cron reconciler installed for root"
-    else
-      warn "Failed to install cron entry — add manually:  ${CRON_LINE}"
-    fi
-  else
-    echo "Skipped cron install. To add later:"
-    echo "    (crontab -l 2>/dev/null | grep -v 'claude-remote reconcile'; echo '$CRON_LINE') | crontab -"
-  fi
 else
   warn "project-sessions skill not found alongside this one — skipping claude-remote install"
   echo "    Expected at: $RELAY_CLI"
+fi
+
+#------------------------------------------------------------------------------
+# 15. Symlink operational helper scripts into /usr/local/bin
+#------------------------------------------------------------------------------
+log "Linking operational helper scripts"
+for helper in check-disk-alerts.sh claude-update.sh; do
+  src="${SCRIPT_DIR}/${helper}"
+  if [[ -f "$src" ]]; then
+    chmod +x "$src"
+    ln -sfn "$src" "/usr/local/bin/${helper}"
+    ok "/usr/local/bin/${helper} -> ${src}"
+  else
+    warn "${src} not found — skipping"
+  fi
+done
+
+#------------------------------------------------------------------------------
+# 16. Logrotate config for /var/log/claude-remote.log
+#------------------------------------------------------------------------------
+log "Installing logrotate config"
+cat > /etc/logrotate.d/claude-remote <<'EOF'
+/var/log/claude-remote.log /var/log/claude-update.log {
+    weekly
+    rotate 4
+    compress
+    delaycompress
+    missingok
+    notifempty
+    create 0640 root root
+}
+EOF
+ok "/etc/logrotate.d/claude-remote installed"
+
+#------------------------------------------------------------------------------
+# 17. Cron jobs (reconcile + disk monitor + weekly CLI update)
+#------------------------------------------------------------------------------
+CRON_RECONCILE='*/5 * * * * /usr/local/bin/claude-remote reconcile'
+CRON_DISK='17 */2 * * * /usr/local/bin/check-disk-alerts.sh 90'
+CRON_UPDATE='23 4 * * 0 /usr/local/bin/claude-update.sh'
+
+install_cron=0
+if [[ $ASSUME_YES -eq 1 ]]; then
+  install_cron=1
+elif [[ -t 0 ]]; then
+  cat <<EOF
+Install root crontab entries?
+  ${CRON_RECONCILE}     (every 5 min — restart any desired=running project that's down)
+  ${CRON_DISK}     (every 2 hours — append to /root/.claude/system-alerts.md if any partition >= 90%)
+  ${CRON_UPDATE}    (weekly Sun 04:23 — claude CLI update, skips if any session is running)
+EOF
+  read -r -p "Install? [y/N] " ans
+  [[ "$ans" =~ ^[Yy]$ ]] && install_cron=1
+fi
+
+if [[ $install_cron -eq 1 ]]; then
+  if (crontab -l 2>/dev/null \
+        | grep -v 'claude-remote reconcile' \
+        | grep -v 'check-disk-alerts.sh' \
+        | grep -v 'claude-update.sh'
+      echo "$CRON_RECONCILE"
+      echo "$CRON_DISK"
+      echo "$CRON_UPDATE") | crontab -; then
+    ok "Cron entries installed for root"
+  else
+    warn "Failed to install cron entries — add manually (see above)"
+  fi
+else
+  echo "Skipped cron install. To add later, run:"
+  echo "  (crontab -l 2>/dev/null; echo '$CRON_RECONCILE'; echo '$CRON_DISK'; echo '$CRON_UPDATE') | crontab -"
 fi
 
 echo
