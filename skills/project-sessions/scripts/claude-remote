@@ -785,8 +785,9 @@ cmd_health() {
     local sz; sz=$(du -sh "$d" 2>/dev/null | awk '{print $1}')
     local oldest_d="-" newest_d="-"
     if [[ "$cnt" -gt 0 ]]; then
-      oldest_d=$(find "$d" -maxdepth 1 -name '*.jsonl' -printf '%T+ %f\n' 2>/dev/null | sort | head -1 | awk '{print $1}' | cut -d'T' -f1)
-      newest_d=$(find "$d" -maxdepth 1 -name '*.jsonl' -printf '%T+ %f\n' 2>/dev/null | sort | tail -1 | awk '{print $1}' | cut -d'T' -f1)
+      # %T+ emits the timestamp separated by '+'; date is the first chunk.
+      oldest_d=$(find "$d" -maxdepth 1 -name '*.jsonl' -printf '%T+ %f\n' 2>/dev/null | sort | head -1 | awk -F'+' '{print $1}')
+      newest_d=$(find "$d" -maxdepth 1 -name '*.jsonl' -printf '%T+ %f\n' 2>/dev/null | sort | tail -1 | awk -F'+' '{print $1}')
     fi
     local color=""
     # 200+ sessions or >500M in one workspace = yellow flag (advisory only)
