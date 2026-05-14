@@ -76,6 +76,29 @@ When it finishes, you have:
 
 Re-running is safe — every step is idempotent.
 
+#### One more step: authenticate Claude Code on the relay
+
+Bootstrap installs the `claude` binary for root *and* the claude user but doesn't fetch credentials — that's a separate step. The fastest path is to mint a long-lived OAuth token from any other machine where Claude Code is already authed (most likely your laptop):
+
+```bash
+# On a machine where Claude Code is already authed (run claude /login first if not):
+claude setup-token
+# Copy the printed token — it's valid for ~1 year.
+
+# On the relay, drop it into /etc/environment so root, the claude user,
+# tmux, and cron all inherit it via PAM:
+ssh root@<relay-ip> "grep -q '^CLAUDE_CODE_OAUTH_TOKEN=' /etc/environment \
+                       || echo 'CLAUDE_CODE_OAUTH_TOKEN=<paste-token>' >> /etc/environment"
+
+# Verify (each opens a fresh login shell so /etc/environment is read):
+ssh root@<relay-ip> 'bash -lc "claude --version"'
+ssh root@<relay-ip> 'sudo -u claude bash -lc "claude --version"'
+```
+
+Both `--version` invocations should print cleanly without prompting for auth. Once they do, the relay is fully usable: `claude-remote root resume` will spin up a working root session.
+
+**Alternative**: use a Console API key (`ANTHROPIC_API_KEY=sk-ant-...`) instead of the OAuth token — same place in `/etc/environment`. Useful if you want explicit per-token cost control rather than your subscription. See https://code.claude.com/docs/en/authentication.md for the precedence rules.
+
 #### Want to see what bootstrap will do before it does it?
 
 ```bash
@@ -120,6 +143,27 @@ Don't bootstrap projects or start sessions in this run.
 3. **Sanity check before lockdown.** The installer hardens SSH (disables password auth, sets `PermitRootLogin prohibit-password`). The assistant should verify your key actually works (`ssh -i ~/.ssh/<key> root@<IP> 'echo ok'`) before kicking off the installer — otherwise you risk being locked out.
 
 Once SSH is verified, the assistant runs the public `curl ... install.sh | bash`, waits for completion, runs `claude-remote health` over SSH, and reports back. Anything that needs your attention — missing dependencies, partition usage flags, anomalies — gets surfaced explicitly.
+
+4. **Authenticate Claude Code on the relay (no browser-on-VPS needed).** Bootstrap installs the `claude` binary for both root and the `claude` user, but neither account has credentials yet. The assistant should mint a long-lived OAuth token from your *local* machine (where you're already authed running the install) and inject it as a system-wide env var on the relay:
+
+   ```bash
+   # On the local machine (run by the assistant — captures token, doesn't echo it back):
+   claude setup-token
+
+   # Push to /etc/environment so every login session, tmux, and cron job
+   # inherits it (PAM reads this file). Idempotent grep guard:
+   ssh -i ~/.ssh/claude-remote-relay root@<ip> \
+     "grep -q '^CLAUDE_CODE_OAUTH_TOKEN=' /etc/environment \
+        || echo 'CLAUDE_CODE_OAUTH_TOKEN=<token>' >> /etc/environment"
+
+   # Verify both users see auth (fresh SSH sessions pick up /etc/environment):
+   ssh root@<ip> 'bash -lc "claude --version"'
+   ssh root@<ip> 'sudo -u claude bash -lc "claude --version"'
+   ```
+
+   Both `claude --version` invocations should print the version without prompting for auth. If they print version and exit cleanly, the relay is fully usable — `claude-remote root resume` will start a working session immediately.
+
+   The token is valid for ~1 year. Renew with another `claude setup-token` + re-write to `/etc/environment` when it expires.
 
 #### Required tools on the assistant's side
 
