@@ -63,6 +63,35 @@ fi
 ok "Repo present at $INSTALL_DIR"
 
 #------------------------------------------------------------------------------
+# Ensure swap exists BEFORE running the Claude installer.
+#
+# The native installer briefly maps ~70GB of virtual address space during
+# extraction. On low-RAM VPSes (especially the $2-4/mo 512MB-1GB tier) this
+# OOM-kills the install partway through. We sidestep it by creating a swap
+# file proportional to RAM: <1GB RAM → 2GB swap; otherwise 1GB. Bootstrap
+# has the same logic later (idempotent) for the standalone-bootstrap case.
+#------------------------------------------------------------------------------
+if [[ "$(swapon --show 2>/dev/null | wc -l)" -eq 0 ]]; then
+  total_mb=$(awk '/MemTotal/{print int($2/1024)}' /proc/meminfo)
+  if [[ "$total_mb" -lt 1024 ]]; then
+    swap_size=2G
+  else
+    swap_size=1G
+  fi
+  log "Creating ${swap_size} swap (RAM is ${total_mb}MB)"
+  fallocate -l "$swap_size" /swapfile
+  chmod 600 /swapfile
+  mkswap /swapfile >/dev/null
+  swapon /swapfile
+  if ! grep -q '^/swapfile' /etc/fstab; then
+    echo '/swapfile none swap sw 0 0' >> /etc/fstab
+  fi
+  ok "Swap active (${swap_size})"
+else
+  ok "Swap already present — leaving alone"
+fi
+
+#------------------------------------------------------------------------------
 # Install Claude Code CLI for root if missing
 #------------------------------------------------------------------------------
 if [[ ! -x /root/.local/bin/claude ]]; then

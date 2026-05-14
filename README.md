@@ -328,7 +328,7 @@ These cost time during the original build. Worth knowing if you're modifying the
 
 | Size | Notes |
 |---|---|
-| **$2-4/mo** (512MB-1GB) | Works for one or two projects. Low-RAM caveat: the Claude installer can OOM during extraction on very tight boxes — bootstrap handles this by copying root's binary to the claude user instead of re-downloading. |
+| **$2-4/mo** (512MB-1GB) | Works for one or two projects. The Claude Code installer briefly maps ~70GB of virtual address space and can OOM-kill itself on very tight boxes; `install.sh` sidesteps this by creating a **2GB swap file** (vs. the default 1GB on larger boxes) before invoking the installer, and bootstrap then clones root's binary across to the claude user rather than re-downloading. All automatic — no manual intervention needed. |
 | **$6/mo** (1GB) | Comfortable for a few projects |
 | **$12/mo** (2GB) | Several parallel project sessions, plus the root session running persistently |
 

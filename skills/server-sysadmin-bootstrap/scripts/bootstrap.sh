@@ -155,18 +155,29 @@ EOF
 ok "Unattended upgrades enabled"
 
 #------------------------------------------------------------------------------
-# 7. 1GB swap if none
+# 7. Swap (RAM-proportional)
 #------------------------------------------------------------------------------
+# The Claude Code installer briefly maps ~70GB of virtual address space during
+# extraction; on low-RAM VPSes this OOM-kills the install. Size swap by RAM:
+# <1GB RAM → 2GB swap (essential for the 512MB tier), otherwise 1GB.
+# install.sh creates swap earlier (before installing claude); this step is the
+# safety net for standalone bootstrap invocations.
 log "Checking swap"
 if [[ "$(swapon --show | wc -l)" -eq 0 ]]; then
-  fallocate -l 1G /swapfile
+  total_mb=$(awk '/MemTotal/{print int($2/1024)}' /proc/meminfo)
+  if [[ "$total_mb" -lt 1024 ]]; then
+    swap_size=2G
+  else
+    swap_size=1G
+  fi
+  fallocate -l "$swap_size" /swapfile
   chmod 600 /swapfile
   mkswap /swapfile >/dev/null
   swapon /swapfile
   if ! grep -q '^/swapfile' /etc/fstab; then
     echo '/swapfile none swap sw 0 0' >> /etc/fstab
   fi
-  ok "1GB swap created"
+  ok "${swap_size} swap created (RAM is ${total_mb}MB)"
 else
   ok "Swap already present"
 fi
