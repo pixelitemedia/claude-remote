@@ -89,61 +89,46 @@ INTERACTIVE=1 curl -fsSL https://raw.githubusercontent.com/pixelitemedia/claude-
 
 For automated installs (the default `curl|bash`) we just assume yes — appropriate for the common case of installing onto a fresh VPS where the SSH-key check has already passed.
 
-### Install via Claude (easiest path for first-timers)
+### Install via an AI assistant (easiest path)
 
-Don't want to paste shell commands yourself? Have Claude do the install end-to-end. Open a **fresh Claude session** (Claude Code on your Mac, Claude Desktop with bash access, or any Claude that can SSH) and paste this prompt, filling in the placeholder for `<IP_OR_HOSTNAME>` and picking one auth mode:
+If you'd rather have an AI walk you through the install, paste this short prompt into a fresh **Claude Code**, **Claude Desktop**, **Codex CLI**, or any other agent that has **bash + SSH** access. You don't need to edit anything in it — the assistant will ask whatever it needs.
 
 ```
-I want to install claude-remote on a fresh VPS. Details below.
+Install claude-remote on a VPS for me.
 
-VPS IP/hostname: <IP_OR_HOSTNAME>
-
-Auth mode (PICK ONE, delete the others):
-
-  A. I have not created the VPS yet — please generate me a fresh
-     ed25519 SSH key first, save the private key to
-     ~/.ssh/claude-remote-relay, show me the public key, and pause
-     until I confirm I've pasted it into my VPS provider's "Add SSH
-     Key" panel and provisioned the droplet.
-
-  B. My SSH key is already authorized for root@<IP> (the provider
-     installed it for me from cloud-init / SSH key panel). Key file:
-     ~/.ssh/<keyname>
-
-  C. The VPS is up and all I have is a root password. Password:
-     <PASSWORD> — please generate a fresh ed25519 key for me, save
-     the private key to ~/.ssh/claude-remote-relay, use sshpass to
-     log in with the password, deploy the public key into
-     /root/.ssh/authorized_keys, and from there proceed with the
-     install over key-based SSH.
-
-Repo: https://github.com/pixelitemedia/claude-remote
+Repo:      https://github.com/pixelitemedia/claude-remote
 Installer: https://raw.githubusercontent.com/pixelitemedia/claude-remote/main/install.sh
 
-Please:
-  1. If mode A: generate ~/.ssh/claude-remote-relay (ed25519, no
-     passphrase, mode 600), show me the public key, and wait for me
-     to confirm the droplet is up before continuing.
-  2. If mode C: generate ~/.ssh/claude-remote-relay (same as A),
-     install sshpass if it's missing locally (brew install hudochenkov/sshpass/sshpass
-     on macOS, apt-get on Linux), use the password to push the public
-     key into root's authorized_keys, then immediately stop using
-     password auth — every subsequent connection uses the new key.
-  3. Verify you can SSH in as root with the key (key-only, no
-     password).
-  4. Run the one-line installer (curl ... install.sh | bash).
-  5. After it finishes, run `claude-remote health` over SSH and report
-     the output verbatim.
-  6. Surface anything that looks like a warning, missing piece, or
-     manual follow-up I need to do.
-
-Don't bootstrap projects or start sessions in this run — just the
-install + health check.
+Read the README's "Install via an AI assistant" section, then ask me
+what you need (VPS provisioned yet? what auth do I have? etc.) before
+doing anything. Run the public installer once you can SSH in as root
+with a key, verify with `claude-remote health`, and report any warnings.
+Don't bootstrap projects or start sessions in this run.
 ```
 
-> **Note:** The fresh Claude session needs Bash + SSH access. Claude Code on a Mac is the cleanest fit. Claude Desktop also works if your environment has those tools.
+#### What the assistant will ask
 
-After the install completes, you can connect from your phone via Remote Control to drive the new relay. The root session will appear in your session picker as **🛠️ 🌐 🧠  [root]  Sysadmin**.
+1. **Is the VPS already provisioned?**
+   - **No / "I haven't created it yet"** → the assistant generates a fresh ed25519 keypair (saves the private key to `~/.ssh/claude-remote-relay`, mode 600), shows you the **public** key, and **pauses** while you paste the pubkey into your VPS provider's "Add SSH Key" panel and create the droplet. When you come back with the IP, it continues.
+   - **Yes** → it asks question 2.
+
+2. **What auth do you have for root on the VPS?**
+   - **An existing SSH key** authorized for `root@<IP>` (cloud-init, provider's panel, manually added). You give the assistant the IP and the path to your private key.
+   - **A root password only** → the assistant generates a fresh ed25519 keypair (same as the "not provisioned" branch), uses `sshpass` for **one** connection to deploy the public key into `/root/.ssh/authorized_keys`, then switches to key-only auth for everything after.
+   - **Nothing on the box yet** → same as "not provisioned" — generate the key first.
+
+3. **Sanity check before lockdown.** The installer hardens SSH (disables password auth, sets `PermitRootLogin prohibit-password`). The assistant should verify your key actually works (`ssh -i ~/.ssh/<key> root@<IP> 'echo ok'`) before kicking off the installer — otherwise you risk being locked out.
+
+Once SSH is verified, the assistant runs the public `curl ... install.sh | bash`, waits for completion, runs `claude-remote health` over SSH, and reports back. Anything that needs your attention — missing dependencies, partition usage flags, anomalies — gets surfaced explicitly.
+
+#### Required tools on the assistant's side
+
+- `bash`, `ssh`, `ssh-keygen` — every standard developer machine has these
+- `sshpass` — **only** for the password-only auth path. macOS install: `brew install hudochenkov/sshpass/sshpass`. Linux: `apt-get install sshpass` / `dnf install sshpass`. The assistant should offer to install it if missing.
+
+#### After install
+
+You can connect from your phone via Remote Control immediately. The root session appears in the session picker as **🛠️ 🌐 🧠  [root]  Sysadmin**.
 
 ### Provision your first target server
 
