@@ -27,7 +27,7 @@ Steps:
    ```json
    {
      "project": "<project>",
-     "session_label": "🛠️🌐 - <reference-name> Sysadmin",
+     "session_label": "🛠️ 🌐  [<project>]  Sysadmin",
      "hosts": [
        {
          "name": "<reference-name>",
@@ -39,7 +39,7 @@ Steps:
      ]
    }
    ```
-   - `session_label` is the title shown in Remote Control's session picker. The convention is `🛠️🌐 - <ReferenceName> Sysadmin`. Confirm with the user — they may want a different emoji or wording.
+   - `session_label` is the **initial** title shown in Remote Control's session picker. Convention: `🛠️ 🌐  [<project>]  Sysadmin` (two-space padding around the brackets, no inner spaces). Project Claude will `/rename` to a topic-aware suffix on the first user message per its CLAUDE.md.
    - If the user wants multiple hosts in one project, add them all to `hosts` and pick one as `default: true`.
 4. **Write `CLAUDE.md`** — start from the template in `references/project-CLAUDE.md.template` (copy and fill in target-server details). Leave runbook sections as TODO stubs for the user to grow over time.
 5. **Install server-ssh skill** by copying the sibling skill at `../server-ssh/` (i.e. `skills/server-ssh/` in the repo) into `/home/claude/<project>/.claude/skills/server-ssh/`. Ensure ownership is `claude:claude`.
@@ -47,7 +47,7 @@ Steps:
 7. **Print the `authorized_keys` line** for the user to paste on the target server:
    ```
    ✅ Project '<project>' provisioned.
-   Session label: 🛠️🌐 - <reference-name> Sysadmin
+   Session label: 🛠️ 🌐  [<project>]  Sysadmin
    Paste this on <hostname> as <user>:
 
        <contents of /home/claude/<project>/key.pub>

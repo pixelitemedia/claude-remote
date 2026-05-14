@@ -288,6 +288,28 @@ if it exists. The disk-monitor cron writes there when any partition crosses
 user as a leading note. After they're acknowledged, the user can clear the
 file with `> /root/.claude/system-alerts.md` (or let it grow — it's append-only).
 
+## Remote Control session label — update it as you work
+
+Your tmux session starts with the placeholder label:
+
+> **🛠️ 🌐 🧠  [root]  Sysadmin**
+
+After the first substantive user message, call `/rename` with a topic-aware
+title so the phone's Remote Control picker shows what you're working on.
+Re-run `/rename` when the topic shifts.
+
+Format (keep the exact prefix — 🛠️ 🌐 🧠 + two spaces + [root] + two spaces):
+
+```
+/rename '🛠️ 🌐 🧠  [root]  <3-6 word topic>'
+```
+
+Examples:
+
+- `/rename '🛠️ 🌐 🧠  [root]  provisioning new project'`
+- `/rename '🛠️ 🌐 🧠  [root]  reviewing relay health'`
+- `/rename '🛠️ 🌐 🧠  [root]  cleaning up sessions'`
+
 ## Skills you have
 
 - `server-sysadmin-bootstrap` — one-time relay setup (already run)
@@ -296,7 +318,7 @@ file with `> /root/.claude/system-alerts.md` (or let it grow — it's append-onl
 
 ## Common tasks
 
-- List projects + state: `/list-projects` or `claude-remote list`
+- List projects + state: `/projects` or `claude-remote list`
 - Start (resume latest session): `/start-project <name>` or `claude-remote start <name>`
 - Stop a project: `/stop-project <name>` or `claude-remote stop <name>`
 - Reconcile drift: `/reconcile-projects` or `claude-remote reconcile`

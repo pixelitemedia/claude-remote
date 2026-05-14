@@ -21,7 +21,7 @@ LOG_FILE="/var/log/claude-remote.log"
 ROOT_SESSION="claude-root"
 ROOT_DIR="/root"
 ROOT_CLAUDE_BIN="/root/.local/bin/claude"
-ROOT_DEFAULT_LABEL="🛠️ 🌐 🧠 - Sysadmin (root)"
+ROOT_DEFAULT_LABEL="🛠️ 🌐 🧠  [root]  Sysadmin"
 
 c_blue=$'\033[1;34m'
 c_green=$'\033[1;32m'
@@ -124,17 +124,22 @@ discover_projects() {
     ! -name '.*' -printf '%f\n' | sort
 }
 
-# Resolve the Remote Control session label for a project:
-#   1. config.json "session_label" if set
-#   2. "🛠️🌐 - <default-host-name> Sysadmin"
-#   3. "🛠️🌐 - <project> Sysadmin" (capitalized)
+# Resolve the initial Remote Control session label for a project. This is the
+# value passed to `claude --remote-control -n <label>` when the tmux session
+# starts; project Claude is expected to /rename it to a topic-specific title
+# (e.g. "🛠️ 🌐  [agent]  systemd diagnosis") on the first substantive user
+# message — see the project's CLAUDE.md for that instruction.
+#
+# Resolution order:
+#   1. config.json "session_label" — explicit override
+#   2. "🛠️ 🌐  [<project>]  Sysadmin" — default starting state
 session_label() {
   local project=$1
   local cfg="$(project_dir "$project")/config.json"
   python3 - "$cfg" "$project" <<'PY'
 import json, sys
 cfg_path, project = sys.argv[1:]
-default_template = f"🛠️🌐 - {project[:1].upper() + project[1:]} Sysadmin"
+default_template = f"🛠️ 🌐  [{project}]  Sysadmin"
 try:
     with open(cfg_path) as f:
         cfg = json.load(f)
@@ -144,10 +149,7 @@ except Exception:
 if cfg.get("session_label"):
     print(cfg["session_label"])
     sys.exit()
-hosts = cfg.get("hosts", [])
-default_host = next((h for h in hosts if h.get("default")), hosts[0] if hosts else None)
-ref = (default_host or {}).get("name") or project
-print(f"🛠️🌐 - {ref} Sysadmin")
+print(default_template)
 PY
 }
 
@@ -1232,6 +1234,13 @@ cmd_install() {
   say "${c_green}✓${c_reset} /usr/local/bin/claude-remote -> $self"
 
   install -d -m 0750 "$cmds_dst"
+  # Defensive cleanup: remove any broken symlinks from prior installs (e.g.
+  # after a slash-command rename or path migration).
+  for link in "$cmds_dst"/*.md; do
+    [[ -L "$link" ]] || continue
+    [[ -e "$link" ]] && continue
+    rm -f "$link"
+  done
   if [[ -d "$cmds_src" ]]; then
     local n=0
     for f in "$cmds_src"/*.md; do

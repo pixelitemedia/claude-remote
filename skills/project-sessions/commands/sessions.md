@@ -16,6 +16,6 @@ Show the user available Claude sessions for project "$ARGUMENTS" and let them pi
 3. Present the table cleanly and ask the user which one they'd like to resume.
 4. When they pick, call `claude-remote resume $ARGUMENTS <ID>` using the 8-char prefix from the table.
    - This stops the currently-running project session (if any) and starts a new tmux session resuming the chosen Claude session.
-   - The Remote Control session label (`🛠️🌐 - <ref> Sysadmin`) is preserved.
+   - The Remote Control session label (`🛠️ 🌐  [<project>]  …`) is preserved.
 
 If the table is empty, tell the user there are no prior sessions and offer to start a fresh one with `claude-remote start $ARGUMENTS`.

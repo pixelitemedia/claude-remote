@@ -108,7 +108,7 @@ Claude will:
 You: /start-project agent
 ```
 
-Or directly: `claude-remote start agent`. The tmux session starts, Claude registers it with Remote Control, and within seconds you'll see **🛠️ 🌐 🧠 - Agent Sysadmin** in the iOS app's session picker. Tap it. You're now driving a Claude session that has SSH access to `agent.example.com` and nothing else.
+Or directly: `claude-remote start agent`. The tmux session starts, Claude registers it with Remote Control, and within seconds you'll see **🛠️ 🌐  [agent]  Sysadmin** in the iOS app's session picker. Tap it. You're now driving a Claude session that has SSH access to `agent.example.com` and nothing else. As soon as you send the first message, Claude updates the label to reflect the topic (e.g. **🛠️ 🌐  [agent]  systemd diagnosis**).
 
 ## Day-to-day
 
@@ -162,7 +162,7 @@ claude-remote root sessions         # interactive picker over prior sessions
 claude-remote root stop             # mark desired=stopped (disenrolls from reconcile)
 claude-remote root status           # current state (running, desired, label)
 claude-remote root rename "<label>" # change the Remote Control label
-                                    # (default: "🛠️ 🌐 🧠 - Sysadmin (root)")
+                                    # (default: "🛠️ 🌐 🧠  [root]  Sysadmin")
 ```
 
 State for root lives under `state.json`'s top-level `root` object (separate from `projects`).
@@ -192,7 +192,7 @@ claude-remote resume agent 7e1b8455     # 8-char prefix is enough if unique
 
 | Command | Action |
 |---|---|
-| `/list-projects` | `claude-remote list` |
+| `/projects` | `claude-remote list` |
 | `/project-status <name>` | `claude-remote status <name>` |
 | `/sessions <name>` | `claude-remote sessions <name>` — list prior sessions and pick one to resume |
 | `/start-project <name>` | `claude-remote start <name>` (fresh) |
@@ -203,16 +203,20 @@ claude-remote resume agent 7e1b8455     # 8-char prefix is enough if unique
 
 ### Remote Control session labels
 
-Each project's tmux session shows up in the phone's session picker with a custom label, defaulting to:
+Each project session shows up in the phone's session picker with a label like:
 
-> **🛠️ 🌐 🧠 - `<ReferenceName>` Sysadmin**
+> **🛠️ 🌐  [agent]  Sysadmin**
 
-Stored as `session_label` in the project's `config.json`; passed to `claude --remote-control -n "<label>"` when the tmux session is started.
+That's the initial placeholder — the prefix `🛠️ 🌐  [<project>]  ` is set by `claude --remote-control -n <label>` at tmux launch (stored in `config.json` as `session_label` if you want to override the default).
 
-Change it:
+The interesting part: each project's `CLAUDE.md` tells Claude to **`/rename`** after the first user message with a topic-specific suffix, so the label becomes something like:
+
+> **🛠️ 🌐  [agent]  systemd diagnosis**
+
+…and updates as the conversation pivots. Root sessions follow the same pattern with the prefix `🛠️ 🌐 🧠  [root]  `. To force a persistent override:
 
 ```bash
-claude-remote rename agent "🚀 Agent (Prod)"
+claude-remote rename agent "🚀  [agent]  prod-only mode"
 claude-remote restart agent
 ```
 
@@ -255,7 +259,7 @@ Reports: total disk usage of `~/.claude/projects/`, per-workspace session counts
 | [`skills/server-ssh/`](skills/server-ssh/) | Operator skill — copied into each project workspace at provisioning time |
 | [`skills/project-sessions/`](skills/project-sessions/) | Stateful session manager (start / stop / resume / reconcile) |
 | [`skills/project-sessions/scripts/claude-remote`](skills/project-sessions/scripts/claude-remote) | The `claude-remote` CLI |
-| [`skills/project-sessions/commands/`](skills/project-sessions/commands/) | Slash commands (`/list-projects`, `/start-project`, …) |
+| [`skills/project-sessions/commands/`](skills/project-sessions/commands/) | Slash commands (`/projects`, `/start-project`, …) |
 | [`skills/project-sessions/references/cron.example`](skills/project-sessions/references/cron.example) | Cron snippets + optional Haiku health-check pattern |
 
 ## Skills

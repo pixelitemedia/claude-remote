@@ -8,20 +8,29 @@ Project Claude session managing **{{REFERENCE_NAME}}** ({{HOSTNAME}}).
 - Available hosts are defined in `./config.json`.
 - Your private key is `./key`; matching public key on the target is `./key.pub`.
 
-## Remote Control session label
+## Remote Control session label — update it as you work
 
-This project appears in the phone's Remote Control session picker as:
+This project's tmux session starts with the label:
 
-> **🛠️🌐 - {{REFERENCE_NAME}} Sysadmin**
+> **🛠️ 🌐  [{{PROJECT_NAME}}]  Sysadmin**
 
-The label is stored in `./config.json` as `session_label`. To change it, edit that field and restart the session, or run as root on the relay:
+That's just a placeholder. **After the first substantive user message, call `/rename` to set a topic-aware title** so the phone's Remote Control picker shows what you're actually doing. Re-run `/rename` when the topic shifts noticeably.
 
-```bash
-claude-relay rename {{PROJECT_NAME}} "🛠️🌐 - {{REFERENCE_NAME}} Sysadmin"
-claude-relay restart {{PROJECT_NAME}}
+Format:
+
+```
+/rename '🛠️ 🌐  [{{PROJECT_NAME}}]  <3-6 word topic>'
 ```
 
-The default template is `🛠️🌐 - <ReferenceName> Sysadmin`.
+Examples:
+
+- `/rename '🛠️ 🌐  [{{PROJECT_NAME}}]  systemd diagnosis'`
+- `/rename '🛠️ 🌐  [{{PROJECT_NAME}}]  docker stack restart'`
+- `/rename '🛠️ 🌐  [{{PROJECT_NAME}}]  log review after panic'`
+
+Keep `🛠️ 🌐  [{{PROJECT_NAME}}]  ` as the prefix (two-space padding around the brackets, no spaces inside) so all sessions stay visually consistent in the picker.
+
+The initial label is stored in `./config.json` as `session_label`; you can override the default placeholder by editing that field, but `/rename` is the live update path.
 
 ## Target: {{REFERENCE_NAME}}
 
