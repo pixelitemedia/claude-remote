@@ -58,7 +58,7 @@ You need:
 Run this as root on the relay:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/<your-org>/claude-remote/main/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/pixelitemedia/claude-remote/main/install.sh | bash
 ```
 
 That:
@@ -79,7 +79,7 @@ Re-running is safe — every step is idempotent.
 #### Want to see what bootstrap will do before it does it?
 
 ```bash
-INTERACTIVE=1 curl -fsSL https://raw.githubusercontent.com/<your-org>/claude-remote/main/install.sh | bash
+INTERACTIVE=1 curl -fsSL https://raw.githubusercontent.com/pixelitemedia/claude-remote/main/install.sh | bash
 ```
 
 `INTERACTIVE=1` switches off the default `--yes` mode and makes the bootstrap pause to confirm:
@@ -88,6 +88,55 @@ INTERACTIVE=1 curl -fsSL https://raw.githubusercontent.com/<your-org>/claude-rem
 - **Cron entries** — the three cron jobs (reconcile, disk monitor, weekly self-update) are written to root's crontab. Interactive mode prompts before doing this.
 
 For automated installs (the default `curl|bash`) we just assume yes — appropriate for the common case of installing onto a fresh VPS where the SSH-key check has already passed.
+
+### Install via Claude (easiest path for first-timers)
+
+Don't want to paste shell commands yourself? Have Claude do the install end-to-end. Open a **fresh Claude session** (Claude Code on your Mac, Claude Desktop with bash access, or any Claude that can SSH) and paste this prompt, filling in the placeholder for `<IP_OR_HOSTNAME>` and picking one auth mode:
+
+```
+I want to install claude-remote on a fresh VPS. Details below.
+
+VPS IP/hostname: <IP_OR_HOSTNAME>
+
+Auth mode (PICK ONE, delete the others):
+
+  A. I have not created the VPS yet — please generate me a fresh
+     ed25519 SSH key first, save the private key to
+     ~/.ssh/claude-remote-relay, show me the public key, and pause
+     until I confirm I've pasted it into my VPS provider's "Add SSH
+     Key" panel and provisioned the droplet.
+
+  B. My SSH key is already authorized for root@<IP> (the provider
+     installed it for me from cloud-init / SSH key panel). Key file:
+     ~/.ssh/<keyname>
+
+  C. The VPS only has root password auth right now. Password: <PASSWORD>
+     (Use sshpass for the first connection, then deploy a key so the
+     bootstrap can lock down password login.)
+
+Repo: https://github.com/pixelitemedia/claude-remote
+Installer: https://raw.githubusercontent.com/pixelitemedia/claude-remote/main/install.sh
+
+Please:
+  1. If mode A, generate the key first, share the public key, and wait
+     for me to confirm the droplet is up.
+  2. If mode C, install sshpass if needed and use the password to push
+     ~/.ssh/claude-remote-relay.pub into root's authorized_keys before
+     running the installer.
+  3. Verify you can SSH in as root with the key.
+  4. Run the one-line installer (curl ... install.sh | bash).
+  5. After it finishes, run `claude-remote health` over SSH and report
+     the output verbatim.
+  6. Surface anything that looks like a warning, missing piece, or
+     manual follow-up I need to do.
+
+Don't bootstrap projects or start sessions in this run — just the
+install + health check.
+```
+
+> **Note:** The fresh Claude session needs Bash + SSH access. Claude Code on a Mac is the cleanest fit. Claude Desktop also works if your environment has those tools.
+
+After the install completes, you can connect from your phone via Remote Control to drive the new relay. The root session will appear in your session picker as **🛠️ 🌐 🧠  [root]  Sysadmin**.
 
 ### Provision your first target server
 
