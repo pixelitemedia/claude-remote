@@ -242,9 +242,25 @@ import json, pathlib
 p = pathlib.Path("/root/.claude/settings.json")
 data = json.loads(p.read_text() or "{}")
 data["allowBypassPermissions"] = True
+# Pre-approve the relay-management commands so chained invocations like
+# `claude-remote stop X && claude-remote start X` don't trigger approval
+# prompts. Each chained segment is evaluated independently against this
+# list, so we explicitly include patterns for everything we ship.
+perms = data.setdefault("permissions", {})
+allow = perms.setdefault("allow", [])
+for rule in [
+    "Bash(claude-remote *)",
+    "Bash(claude.sh *)",
+    "Bash(check-disk-alerts.sh *)",
+    "Bash(claude-update.sh *)",
+    "Bash(/usr/local/bin/claude-remote *)",
+    "Bash(/usr/local/bin/claude.sh *)",
+]:
+    if rule not in allow:
+        allow.append(rule)
 p.write_text(json.dumps(data, indent=2))
 PY
-  ok "allowBypassPermissions enabled for root"
+  ok "allowBypassPermissions + permissions.allow set for root"
 fi
 
 # allowBypassPermissions for the claude user too. Without this, every project
@@ -263,9 +279,27 @@ import json, pathlib
 p = pathlib.Path("$CLAUDE_USER_SETTINGS")
 data = json.loads(p.read_text() or "{}")
 data["allowBypassPermissions"] = True
+# Pre-approve commands the claude user routinely runs. ssh is broad but
+# project Claude is sandboxed by config.json's host whitelist (enforced by
+# server-ssh's hard rules) so the trust model already requires Claude to
+# follow that list; the permission prompt just adds friction without
+# changing the safety surface.
+perms = data.setdefault("permissions", {})
+allow = perms.setdefault("allow", [])
+for rule in [
+    "Bash(ssh *)",
+    "Bash(scp *)",
+    "Bash(systemctl *)",
+    "Bash(journalctl *)",
+    "Bash(docker *)",
+    "Bash(git *)",
+    "Bash(tmux *)",
+]:
+    if rule not in allow:
+        allow.append(rule)
 p.write_text(json.dumps(data, indent=2))
 PY
-  ok "allowBypassPermissions enabled for ${CLAUDE_USER}"
+  ok "allowBypassPermissions + permissions.allow set for ${CLAUDE_USER}"
 fi
 
 #------------------------------------------------------------------------------
