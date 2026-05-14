@@ -1,6 +1,6 @@
 ---
 name: project-sessions
-description: Manage relay project Claude sessions — list, start, stop, restart, and auto-reconcile tmux sessions for /home/claude/<project>/ workspaces. Tracks desired state (running/stopped) in /var/lib/claude-remote/state.json so a cron job can restart anything that crashed. Use this skill on the root Claude session of the relay when the user wants to bring a project up, take one down, check what's running, see drift between intended and actual state, or set up monitoring. Triggers on phrases like "start the rai project", "what's running", "list projects", "stop openclaw", "is everything up", "restart the relay sessions". Do NOT use this skill inside a project Claude session — that's server-ssh's job for managing target servers, not relay-side sessions.
+description: Manage relay project Claude sessions — list, start, stop, restart, and auto-reconcile tmux sessions for /home/claude/<project>/ workspaces. Tracks desired state (running/stopped) in /var/lib/claude-remote/state.json so a cron job can restart anything that crashed. Use this skill on the root Claude session of the relay when the user wants to bring a project up, take one down, check what's running, see drift between intended and actual state, or set up monitoring. Triggers on phrases like "start the X project", "what's running", "list projects", "stop X", "is everything up", "restart the relay sessions". Do NOT use this skill inside a project Claude session — that's server-ssh's job for managing target servers, not relay-side sessions.
 ---
 
 # project-sessions

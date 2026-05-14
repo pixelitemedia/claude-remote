@@ -1,6 +1,6 @@
 # CLAUDE.md — claude.remote
 
-Source for the **Remote Sysadmin via Claude Code Relay** project. The runtime lives on a DigitalOcean droplet (the "relay VPS"); this directory holds the skills, scripts, and notes that get deployed to it. User-facing documentation lives in [README.md](README.md) — don't duplicate it here.
+Source for the **Remote Sysadmin via Claude Code Relay** project. The runtime lives on a small Linux VPS (the "relay"); this directory holds the skills, scripts, and notes that get deployed to it. User-facing documentation lives in [README.md](README.md) — don't duplicate it here.
 
 ## What you're working on
 

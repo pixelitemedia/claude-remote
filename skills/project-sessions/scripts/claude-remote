@@ -1221,9 +1221,11 @@ cmd_install() {
   ensure_state
 
   local self; self=$(readlink -f "$0")
-  local skill_dir; skill_dir=$(dirname "$(dirname "$self")")
+  local skill_dir; skill_dir=$(dirname "$(dirname "$self")")        # .../skills/project-sessions
+  local skills_root; skills_root=$(dirname "$skill_dir")            # .../skills
   local cmds_src="$skill_dir/commands"
   local cmds_dst="/root/.claude/commands"
+  local skills_dst="/root/.claude/skills"
 
   chmod +x "$self"
   ln -sfn "$self" /usr/local/bin/claude-remote
@@ -1238,6 +1240,24 @@ cmd_install() {
       n=$((n + 1))
     done
     say "${c_green}✓${c_reset} symlinked $n slash command(s) into $cmds_dst"
+  fi
+
+  # Symlink every skill in the repo into /root/.claude/skills/<name>/.
+  # This lets root Claude run from /root and still see the skills (otherwise
+  # they'd need to be invoked by name with no SKILL.md context). Excludes
+  # `server-ssh` since that's bundled per-project, not for root Claude use.
+  install -d -m 0750 "$skills_dst"
+  if [[ -d "$skills_root" ]]; then
+    local sn=0
+    for sd in "$skills_root"/*/; do
+      [[ -d "$sd" ]] || continue
+      local name; name=$(basename "$sd")
+      [[ "$name" == "server-ssh" ]] && continue
+      [[ -f "$sd/SKILL.md" ]] || continue
+      ln -sfn "${sd%/}" "$skills_dst/$name"
+      sn=$((sn + 1))
+    done
+    say "${c_green}✓${c_reset} symlinked $sn skill(s) into $skills_dst (excl. server-ssh)"
   fi
 
   cat <<EOF

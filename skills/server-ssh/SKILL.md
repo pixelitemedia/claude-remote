@@ -17,9 +17,9 @@ On first use in a session, read `./config.json` to learn what hosts exist. Schem
 
 ```json
 {
-  "project": "rai",
+  "project": "agent",
   "hosts": [
-    { "name": "Rai", "aliases": ["rai", "openclaw"], "hostname": "1.2.3.4", "user": "marcus", "default": true }
+    { "name": "Agent", "aliases": ["agent"], "hostname": "agent.example.com", "user": "john", "default": true }
   ]
 }
 ```
@@ -69,13 +69,13 @@ REMOTE
 | Read file | `cat <path>` |
 | Edit file | use `sed -i` or write via heredoc + `tee` |
 
-## User-level systemd (e.g. OpenClaw on Rai)
+## User-level systemd
 
 If a service runs as a user unit (not system), `systemctl` and `journalctl` both need `--user`:
 
 ```bash
-systemctl --user status openclaw
-journalctl --user -u openclaw -n 200 --no-pager
+systemctl --user status myapp
+journalctl --user -u myapp -n 200 --no-pager
 ```
 
 Run those as the owning user (no `sudo`).

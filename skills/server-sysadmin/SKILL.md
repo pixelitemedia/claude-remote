@@ -11,10 +11,10 @@ You are root Claude on a relay VPS. This skill provisions per-target project wor
 
 Inputs you need from the user (ask for any missing):
 
-- **Project name** — short slug, used as directory name and tmux session suffix (e.g. `rai`, `openclaw`)
+- **Project name** — short slug, used as directory name and tmux session suffix (e.g. `agent`, `web1`)
 - **Hostname** — DNS name or IP of the target server
 - **User** — SSH user on the target (often `root` or a named admin user)
-- **Reference name** — alias the user wants to use in conversation (e.g. "Rai"); defaults to project name
+- **Reference name** — alias the user wants to use in conversation (e.g. "Agent"); defaults to project name
 
 Steps:
 
@@ -69,7 +69,7 @@ Steps:
 1. **SSH must use** `-T -o BatchMode=yes -o StrictHostKeyChecking=no -o ConnectTimeout=10` in scripts. Without these it hangs.
 2. **Pre-authorize workspace trust** — Claude sits at the trust dialog otherwise. Set `hasTrustDialogAccepted: true` in `~/.claude.json`.
 3. **`claude remote-control`** is a positional subcommand, not a `--remote-control` flag.
-4. **User-level systemd services** (e.g. OpenClaw on Rai) need `--user` on both `systemctl` and `journalctl`. The bundled `server-ssh` skill knows this — pass it along in the project's `CLAUDE.md` if relevant.
+4. **User-level systemd services** need `--user` on both `systemctl` and `journalctl`. The bundled `server-ssh` skill knows this — pass it along in the project's `CLAUDE.md` if relevant.
 
 ## Hard rules
 
