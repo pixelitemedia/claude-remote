@@ -110,20 +110,27 @@ Auth mode (PICK ONE, delete the others):
      installed it for me from cloud-init / SSH key panel). Key file:
      ~/.ssh/<keyname>
 
-  C. The VPS only has root password auth right now. Password: <PASSWORD>
-     (Use sshpass for the first connection, then deploy a key so the
-     bootstrap can lock down password login.)
+  C. The VPS is up and all I have is a root password. Password:
+     <PASSWORD> — please generate a fresh ed25519 key for me, save
+     the private key to ~/.ssh/claude-remote-relay, use sshpass to
+     log in with the password, deploy the public key into
+     /root/.ssh/authorized_keys, and from there proceed with the
+     install over key-based SSH.
 
 Repo: https://github.com/pixelitemedia/claude-remote
 Installer: https://raw.githubusercontent.com/pixelitemedia/claude-remote/main/install.sh
 
 Please:
-  1. If mode A, generate the key first, share the public key, and wait
-     for me to confirm the droplet is up.
-  2. If mode C, install sshpass if needed and use the password to push
-     ~/.ssh/claude-remote-relay.pub into root's authorized_keys before
-     running the installer.
-  3. Verify you can SSH in as root with the key.
+  1. If mode A: generate ~/.ssh/claude-remote-relay (ed25519, no
+     passphrase, mode 600), show me the public key, and wait for me
+     to confirm the droplet is up before continuing.
+  2. If mode C: generate ~/.ssh/claude-remote-relay (same as A),
+     install sshpass if it's missing locally (brew install hudochenkov/sshpass/sshpass
+     on macOS, apt-get on Linux), use the password to push the public
+     key into root's authorized_keys, then immediately stop using
+     password auth — every subsequent connection uses the new key.
+  3. Verify you can SSH in as root with the key (key-only, no
+     password).
   4. Run the one-line installer (curl ... install.sh | bash).
   5. After it finishes, run `claude-remote health` over SSH and report
      the output verbatim.
