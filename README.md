@@ -112,9 +112,9 @@ INTERACTIVE=1 curl -fsSL https://raw.githubusercontent.com/pixelitemedia/claude-
 
 For automated installs (the default `curl|bash`) we just assume yes — appropriate for the common case of installing onto a fresh VPS where the SSH-key check has already passed.
 
-### Install via an AI assistant (easiest path)
+### Install via Claude (easiest path)
 
-If you'd rather have an AI walk you through the install, paste this short prompt into a fresh **Claude Code**, **Claude Desktop**, **Codex CLI**, or any other agent that has **bash + SSH** access. You don't need to edit anything in it — the assistant will ask whatever it needs.
+If you'd rather have Claude walk you through the install, paste this short prompt into a fresh **Claude Code** or **Claude Desktop** session with bash + SSH access. You don't need to edit anything — Claude will ask whatever it needs.
 
 ```
 Install claude-remote on a VPS for me.
@@ -122,32 +122,34 @@ Install claude-remote on a VPS for me.
 Repo:      https://github.com/pixelitemedia/claude-remote
 Installer: https://raw.githubusercontent.com/pixelitemedia/claude-remote/main/install.sh
 
-Read the README's "Install via an AI assistant" section, then ask me
-what you need (VPS provisioned yet? what auth do I have? etc.) before
-doing anything. Run the public installer once you can SSH in as root
-with a key, verify with `claude-remote health`, and report any warnings.
-Don't bootstrap projects or start sessions in this run.
+Read the README's "Install via Claude" section, then ask me what you
+need (VPS provisioned yet? what auth do I have? etc.) before doing
+anything. Run the public installer once you can SSH in as root with a
+key, verify with `claude-remote health`, then mint a claude setup-token
+locally and push it to the relay's /etc/environment so the relay's
+Claude can auth without a browser. Don't bootstrap projects or start
+sessions in this run.
 ```
 
-#### What the assistant will ask
+#### What Claude will ask
 
 1. **Is the VPS already provisioned?**
-   - **No / "I haven't created it yet"** → the assistant generates a fresh ed25519 keypair (saves the private key to `~/.ssh/claude-remote-relay`, mode 600), shows you the **public** key, and **pauses** while you paste the pubkey into your VPS provider's "Add SSH Key" panel and create the droplet. When you come back with the IP, it continues.
+   - **No / "I haven't created it yet"** → Claude generates a fresh ed25519 keypair (saves the private key to `~/.ssh/claude-remote-relay`, mode 600), shows you the **public** key, and **pauses** while you paste the pubkey into your VPS provider's "Add SSH Key" panel and create the droplet. When you come back with the IP, it continues.
    - **Yes** → it asks question 2.
 
 2. **What auth do you have for root on the VPS?**
-   - **An existing SSH key** authorized for `root@<IP>` (cloud-init, provider's panel, manually added). You give the assistant the IP and the path to your private key.
-   - **A root password only** → the assistant generates a fresh ed25519 keypair (same as the "not provisioned" branch), uses `sshpass` for **one** connection to deploy the public key into `/root/.ssh/authorized_keys`, then switches to key-only auth for everything after.
+   - **An existing SSH key** authorized for `root@<IP>` (cloud-init, provider's panel, manually added). You give Claude the IP and the path to your private key.
+   - **A root password only** → Claude generates a fresh ed25519 keypair (same as the "not provisioned" branch), uses `sshpass` for **one** connection to deploy the public key into `/root/.ssh/authorized_keys`, then switches to key-only auth for everything after.
    - **Nothing on the box yet** → same as "not provisioned" — generate the key first.
 
-3. **Sanity check before lockdown.** The installer hardens SSH (disables password auth, sets `PermitRootLogin prohibit-password`). The assistant should verify your key actually works (`ssh -i ~/.ssh/<key> root@<IP> 'echo ok'`) before kicking off the installer — otherwise you risk being locked out.
+3. **Sanity check before lockdown.** The installer hardens SSH (disables password auth, sets `PermitRootLogin prohibit-password`). Claude should verify your key actually works (`ssh -i ~/.ssh/<key> root@<IP> 'echo ok'`) before kicking off the installer — otherwise you risk being locked out.
 
-Once SSH is verified, the assistant runs the public `curl ... install.sh | bash`, waits for completion, runs `claude-remote health` over SSH, and reports back. Anything that needs your attention — missing dependencies, partition usage flags, anomalies — gets surfaced explicitly.
+Once SSH is verified, Claude runs the public `curl ... install.sh | bash`, waits for completion, runs `claude-remote health` over SSH, and reports back. Anything that needs your attention — missing dependencies, partition usage flags, anomalies — gets surfaced explicitly.
 
-4. **Authenticate Claude Code on the relay (no browser-on-VPS needed).** Bootstrap installs the `claude` binary for both root and the `claude` user, but neither account has credentials yet. The assistant should mint a long-lived OAuth token from your *local* machine (where you're already authed running the install) and inject it as a system-wide env var on the relay:
+4. **Authenticate Claude Code on the relay (no browser-on-VPS needed).** Bootstrap installs the `claude` binary for both root and the `claude` user, but neither account has credentials yet. Claude should mint a long-lived OAuth token from your *local* machine (where you're already authed running the install) and inject it as a system-wide env var on the relay:
 
    ```bash
-   # On the local machine (run by the assistant — captures token, doesn't echo it back):
+   # On the local machine (run by Claude — captures token, doesn't echo it back):
    claude setup-token
 
    # Push to /etc/environment so every login session, tmux, and cron job
@@ -165,10 +167,10 @@ Once SSH is verified, the assistant runs the public `curl ... install.sh | bash`
 
    The token is valid for ~1 year. Renew with another `claude setup-token` + re-write to `/etc/environment` when it expires.
 
-#### Required tools on the assistant's side
+#### Required tools on Claude's side
 
 - `bash`, `ssh`, `ssh-keygen` — every standard developer machine has these
-- `sshpass` — **only** for the password-only auth path. macOS install: `brew install hudochenkov/sshpass/sshpass`. Linux: `apt-get install sshpass` / `dnf install sshpass`. The assistant should offer to install it if missing.
+- `sshpass` — **only** for the password-only auth path. macOS install: `brew install hudochenkov/sshpass/sshpass`. Linux: `apt-get install sshpass` / `dnf install sshpass`. Claude should offer to install it if missing.
 
 #### After install
 
