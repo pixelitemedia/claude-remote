@@ -1247,6 +1247,17 @@ cmd_install() {
   # they'd need to be invoked by name with no SKILL.md context). Excludes
   # `server-ssh` since that's bundled per-project, not for root Claude use.
   install -d -m 0750 "$skills_dst"
+
+  # Defensive cleanup: server-ssh must never live at root level (its
+  # description forbids triggering from root Claude). Also remove any
+  # broken symlinks from prior installs (e.g. after a path migration).
+  [[ -L "$skills_dst/server-ssh" ]] && rm -f "$skills_dst/server-ssh"
+  for link in "$skills_dst"/*; do
+    [[ -L "$link" ]] || continue
+    [[ -e "$link" ]] && continue
+    rm -f "$link"
+  done
+
   if [[ -d "$skills_root" ]]; then
     local sn=0
     for sd in "$skills_root"/*/; do
